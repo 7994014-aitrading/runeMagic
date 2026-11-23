@@ -56,6 +56,8 @@ func _make_node(s: int) -> Button:
 			sb.bg_color = bgc.lightened(0.1)
 		b.add_theme_stylebox_override(st, sb)
 	b.add_theme_font_size_override("font_size", 46)
+	if cleared:
+		b.add_theme_color_override("font_color", UI.STAR_ON)
 	if open:
 		b.text = GameState.chapter.stage_name(s) + "\n" + (UI.stars_text(int(info.get("stars", 0))) if cleared else "")
 	else:
@@ -94,7 +96,8 @@ func _show_info(s: int) -> void:
 		tnames.append(t.title)
 	lines.append("보스: %s" % ch.boss_name(s))
 	lines.append("보스 특성: " + (" · ".join(tnames) if not tnames.is_empty() else "없음"))
-	lines.append("적 체력 x%.2f · 보스 체력 x%.2f" % [ch.enemy_hp_mult(s), ch.boss_hp_mult(s)])
+	var diff := ["쉬움", "쉬움", "보통", "보통", "보통", "어려움", "어려움", "어려움", "매우 어려움", "매우 어려움"]
+	lines.append("난이도: " + diff[clampi(s - 1, 0, diff.size() - 1)])
 	var names := []
 	for e in GameState.runes():
 		names.append(Element.name_of(e))
@@ -105,6 +108,7 @@ func _show_info(s: int) -> void:
 	lines.append(reward)
 	vb.add_child(UI.label("\n".join(lines), 36))
 	var start := UI.button("시작", 140, 56)
+	start.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
 	start.pressed.connect(func(): GameState.start_stage(s))
 	vb.add_child(start)
 	var close := UI.button("닫기", 100, 36)

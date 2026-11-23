@@ -54,6 +54,7 @@ var _hint_label: Label
 var _hint_time := 0.0
 var _await_rune := Element.NONE  # 튜토리얼: 이 룬을 그릴 때까지 전장 정지
 var _guide_t := 0.0
+var _guide_node: Node2D  # 튜토리얼 큰 안내선 (전장 위에 그린다)
 var _double_button: Button
 var _last_res := {}  # 이번 판 결과 (보상 2배용)
 var _continue_panel: Control
@@ -122,7 +123,7 @@ func _ready() -> void:
 		recognizer = RuneRecognizer.new(config, _runes)
 		_add_practice_back()
 	result_label.text = ""
-	detail_label.text = "화면 아무 곳에 룬을 한 획으로 그려봐"
+	detail_label.text = "화면 아무 곳에나 룬을 한 번에 그리세요"
 	for n in HUD_FOLLOW_BOTTOM + HUD_FOLLOW_CENTER:
 		var c := get_node_or_null("HUD/" + n) as Control
 		if c != null:
@@ -207,7 +208,8 @@ func _process(delta: float) -> void:
 			_hint_panel.visible = false
 	if _await_rune != Element.NONE:
 		_guide_t += delta
-		queue_redraw()
+		if _guide_node != null:
+			_guide_node.queue_redraw()
 	if _result_time > 0.0:
 		_result_time -= delta
 		result_label.modulate.a = clampf(_result_time, 0.0, 1.0)
@@ -571,14 +573,16 @@ func _show_result_panel(won: bool) -> void:
 		var res := GameState.record_result(_stage, won, b.wave, ratio)
 		_last_res = res
 		stars = res.stars
-		lines.append("스테이지 %s · 웨이브 %d / %d" % [GameState.chapter.stage_name(_stage), b.wave, b.combat.wave_count])
-		lines.append("마력석 +%d%s  (보유 %d)" % [res.stones, " · 첫 클리어 보너스 포함" if res.first_clear else "", GameState.data.stones])
+		var reward := "마력석 +%d" % res.stones
 		if res.gems > 0:
-			lines.append("룬 수정 +%d" % res.gems)
+			reward += "   수정 +%d" % res.gems
+		lines.append(reward + ("   (첫 클리어 보너스)" if res.first_clear else ""))
 		for e in res.new_runes:
-			lines.append("새 룬 해금: %s" % Element.name_of(e))
+			lines.append("★ 새 룬: %s" % Element.name_of(e))
 		if res.first_clear and _stage < GameState.chapter.stage_count:
 			lines.append("스테이지 %s 열림" % GameState.chapter.stage_name(_stage + 1))
+		if not won:
+			lines.append("웨이브 %d / %d 까지" % [b.wave, b.combat.wave_count])
 	else:
 		stars = GameState.chapter.stars_for(ratio) if won else 0
 		lines.append("도달 웨이브 %d / %d" % [b.wave, b.combat.wave_count])
@@ -666,11 +670,6 @@ func _draw() -> void:
 	var shapes := RuneRecognizer.shapes()
 	var order := _runes
 	var font := UI.font()
-	if _await_rune != Element.NONE:
-		# 튜토리얼: 화면 가운데 큰 안내선 (흰 점에서 시작)
-		var a := 0.35 + 0.25 * sin(_guide_t * 3.0)
-		draw_circle(Vector2(540, 760), 300, Color(1, 1, 1, 0.04))
-		UI.draw_rune(self, _await_rune, Vector2(540, 760), 420, 18.0, a + 0.3)
 	for i in order.size():
 		var e: int = order[i]
 		var cx := 540.0 + (i - (order.size() - 1) / 2.0) * 270.0
@@ -735,6 +734,12 @@ func _dev() -> bool:
 
 func _build_battle_hud() -> void:
 	var hud: CanvasLayer = $HUD
+	for n in ["UpgradePanel", "ResultPanel", "SlotButton", "InvincibleButton", "SkipButton", "RestartButton"]:
+		(get_node("HUD/" + n) as Control).theme = UI.theme()
+	for i in 3:
+		var ob: Button = get_node("HUD/UpgradePanel/Box/Option%d" % i)
+		ob.add_theme_font_size_override("font_size", 36)
+		ob.pressed.connect(func(): GameState.sfx("click"))
 	var rp: Control = $HUD/ResultPanel
 	rp.offset_top = 260.0
 	rp.offset_bottom = 1400.0
@@ -742,13 +747,14 @@ func _build_battle_hud() -> void:
 	_stars_label = UI.label("", 96, UI.STAR_ON)
 	box.add_child(_stars_label)
 	box.move_child(_stars_label, 1)
-	_next_button = UI.button("다음 스테이지", 120, 44)
+	_next_button = UI.button("다음 스테이지", 130, 48)
+	_next_button.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
 	_next_button.pressed.connect(func(): GameState.start_stage(_stage + 1))
 	box.add_child(_next_button)
 	box.move_child(_next_button, $HUD/ResultPanel/Box/Retry.get_index())
 	_double_button = UI.button("", 110, 36)
 	_double_button.theme = UI.theme()
-	_double_button.add_theme_stylebox_override("normal", UI.box(Color(0.3, 0.2, 0.1), UI.STAR_ON, 16, 3))
+	_double_button.add_theme_stylebox_override("normal", UI.box(Color(0.2, 0.16, 0.1), UI.STAR_ON.darkened(0.2), 16, 3))
 	_double_button.add_theme_color_override("font_color", UI.STAR_ON)
 	_double_button.pressed.connect(_double_reward)
 	box.add_child(_double_button)
@@ -769,6 +775,10 @@ func _build_battle_hud() -> void:
 	_stage_label.size = Vector2(500, 60)
 	_stage_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hud.add_child(_stage_label)
+	_guide_node = Node2D.new()
+	_guide_node.z_index = 5
+	add_child(_guide_node)
+	_guide_node.draw.connect(_draw_big_guide)
 	_hint_panel = PanelContainer.new()
 	var sb := UI.box(Color(0.08, 0.08, 0.12, 0.88), UI.GOLD, 18, 3)
 	sb.set_content_margin_all(26)
@@ -877,9 +887,9 @@ const TUTORIAL := {
 	1: [Element.FIRE, "s1", "불 룬 ∧ 을 그려 보세요\n흰 점에서 시작해 손을 떼지 않고 한 번에",
 		"불 속성이 기본 공격에 붙었어요! 화상은 계속 피해를 줍니다.\n게이지가 끝나기 전에 다시 그려 갱신하세요."],
 	2: [Element.ICE, "s2", "새 룬: 얼음 ○\n흰 점에서 시작해 동그랗게 한 번에",
-		"얼음은 적을 느리게 해요. 화상 걸린 적에게 얼음을 맞히면 증기 폭발!\n불과 얼음을 번갈아 그려 보세요."],
+		"얼음은 적을 느리게 합니다.\n화상 걸린 적 + 얼음 = 증기 폭발!\n불과 얼음을 번갈아 그려 보세요."],
 	3: [Element.LIGHTNING, "s3", "새 룬: 번개 Z\n흰 점에서 시작해 한 번에",
-		"번개는 근처 적에게 튑니다.\n감속된 적에 번개 → 빙결, 화상 걸린 적에 번개 → 화상 전파."],
+		"번개는 근처 적에게 튑니다.\n느려진 적 + 번개 = 빙결\n화상 걸린 적 + 번개 = 화상 전파"],
 }
 
 func _on_wave_started(w: int) -> void:
@@ -893,6 +903,8 @@ func _on_wave_started(w: int) -> void:
 func _set_await(e: int) -> void:
 	_await_rune = e
 	_guide_t = 0.0
+	if _guide_node != null:
+		_guide_node.queue_redraw()
 	var mode := Node.PROCESS_MODE_DISABLED if e != Element.NONE else Node.PROCESS_MODE_INHERIT
 	for n in [battle, wizard, get_node_or_null("Projectiles")]:
 		if n != null:
@@ -944,6 +956,7 @@ func _offer_continue() -> void:
 	go.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
 	vb.add_child(go)
 	var have := UI.label("보유 수정 %d" % GameState.gems(), 30, UI.DIM)
+	have.visible = cost > 0
 	vb.add_child(have)
 	go.pressed.connect(func():
 		if GameState.gems() < cost:
@@ -1000,3 +1013,13 @@ func _offer_starter() -> void:
 	var later := UI.button("나중에", 100, 36)
 	later.pressed.connect(func(): dim.queue_free())
 	vb.add_child(later)
+
+func _draw_big_guide() -> void:
+	if _await_rune == Element.NONE:
+		return
+	# 튜토리얼: 전장 가운데 큰 안내선 (흰 점에서 시작), 화살표처럼 깜빡인다
+	var c := Vector2(540, 760)
+	var a := 0.8 + 0.2 * sin(_guide_t * 3.0)
+	_guide_node.draw_circle(c, 290, Color(0, 0, 0, 0.45))
+	_guide_node.draw_arc(c, 290, 0, TAU, 64, Color(UI.GOLD, 0.5), 4, true)
+	UI.draw_rune(_guide_node, _await_rune, c, 420, 18.0, a)

@@ -16,12 +16,15 @@ static func open(parent: Node, on_close: Callable = Callable()) -> Control:
 	vb.add_child(UI.label("설정", 56, UI.GOLD))
 	for it in ITEMS:
 		var c := CheckButton.new()
-		c.text = it[1]
+		var title: String = it[1]
 		c.button_pressed = GameState.setting(it[0])
+		c.text = "%s   %s" % [title, "켜짐" if c.button_pressed else "꺼짐"]
 		c.add_theme_font_size_override("font_size", 40)
 		c.custom_minimum_size = Vector2(0, 100)
 		var key: String = it[0]
-		c.toggled.connect(func(on): GameState.set_setting(key, on))
+		c.toggled.connect(func(on):
+			GameState.set_setting(key, on)
+			c.text = "%s   %s" % [title, "켜짐" if on else "꺼짐"])
 		vb.add_child(c)
 	var reset := UI.button("저장 초기화", 90, 32)
 	reset.add_theme_color_override("font_color", UI.BAD)

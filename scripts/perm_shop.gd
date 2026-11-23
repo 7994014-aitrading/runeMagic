@@ -25,9 +25,9 @@ func _ready() -> void:
 	_refresh()
 
 func _refresh() -> void:
-	_list.add_child(UI.label("영구 강화", 48, UI.GOLD))
 	for c in _list.get_children():
 		c.queue_free()
+	_list.add_child(UI.label("영구 강화", 48, UI.GOLD))
 	for u in GameState.perm_list.items:
 		_list.add_child(_row(u))
 	var note := UI.label("상한이 있어서, 정확하게 그리고 속성을 바꾸는 실력이 여전히 핵심입니다.", 28, UI.DIM)

@@ -29,7 +29,8 @@ static func theme() -> Theme:
 	t.default_font = font()
 	t.default_font_size = 36
 	t.set_stylebox("normal", "Button", box(Color(0.18, 0.18, 0.25), GOLD.darkened(0.45)))
-	t.set_stylebox("hover", "Button", box(Color(0.21, 0.21, 0.29), GOLD.darkened(0.2)))
+	# 터치 화면: 손을 뗀 뒤 남는 hover 모양이 "선택됨"처럼 보이지 않게 hover = normal
+	t.set_stylebox("hover", "Button", box(Color(0.18, 0.18, 0.25), GOLD.darkened(0.45)))
 	t.set_stylebox("pressed", "Button", box(Color(0.3, 0.27, 0.2), GOLD))
 	t.set_stylebox("hover_pressed", "Button", box(Color(0.3, 0.27, 0.2), GOLD))
 	t.set_stylebox("disabled", "Button", box(Color(0.13, 0.13, 0.17), Color(0.28, 0.28, 0.33)))
@@ -44,6 +45,8 @@ static func theme() -> Theme:
 	panel.set_content_margin_all(40)
 	t.set_stylebox("panel", "PanelContainer", panel)
 	t.set_stylebox("panel", "Panel", panel)
+	for st in ["normal", "hover", "pressed", "hover_pressed", "focus"]:
+		t.set_stylebox(st, "CheckButton", box(Color(0.16, 0.16, 0.22), GOLD.darkened(0.5)) if st != "focus" else StyleBoxEmpty.new())
 	t.set_color("font_color", "CheckButton", TEXT)
 	t.set_color("font_hover_color", "CheckButton", TEXT)
 	t.set_color("font_pressed_color", "CheckButton", TEXT)
@@ -119,8 +122,9 @@ static func top_bar(parent: Control, title: String, right_text := "") -> Array:
 	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	t.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar.add_child(t)
-	var r := label(right_text, 34, STAR_ON, HORIZONTAL_ALIGNMENT_RIGHT)
-	r.custom_minimum_size.x = 200
+	var r := label(right_text, 32, STAR_ON, HORIZONTAL_ALIGNMENT_RIGHT)
+	r.autowrap_mode = TextServer.AUTOWRAP_OFF
+	r.custom_minimum_size.x = 240
 	r.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	bar.add_child(r)
 	return [back, t, r]
@@ -209,8 +213,9 @@ static func _pill(text: String, color: Color) -> PanelContainer:
 	sb.content_margin_left = 26
 	sb.content_margin_right = 26
 	p.add_theme_stylebox_override("panel", sb)
-	p.custom_minimum_size = Vector2(250, 90)
-	var l := label(text, 34, color)
+	p.custom_minimum_size = Vector2(270, 90)
+	var l := label(text, 32, color)
+	l.autowrap_mode = TextServer.AUTOWRAP_OFF
 	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	p.add_child(l)
 	return p

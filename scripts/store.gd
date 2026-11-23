@@ -78,7 +78,7 @@ func _product_row(id: String, highlight: bool, note := "") -> Control:
 		UI.confirm_purchase(self, p.title, ShopData.price_text(p.price), func():
 			GameState.grant(id)
 			GameState.sfx("upgrade")
-			UI.notice(self, "구매 완료", p.title)
+			_purchased(p)
 			_refresh()))
 	r[1].add_child(b)
 	return r[0]
@@ -101,3 +101,31 @@ func _exchange_row(id: String) -> Control:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
 		GameState.go(GameState.SCENE_HOME)
+
+## 구매 완료: 받은 것을 줄마다 보여주고, 스킨이면 바로 장착할지 묻는다
+func _purchased(p: Dictionary) -> void:
+	var lines := []
+	if int(p.get("gems", 0)) > 0:
+		lines.append("룬 수정 +%d" % int(p.gems))
+	if int(p.get("stones", 0)) > 0:
+		lines.append("마력석 +%d" % int(p.stones))
+	if p.has("pass_days"):
+		lines.append("앞으로 %d일간 매일 수정 %d" % [int(p.pass_days), ShopData.PASS_DAILY])
+	if p.has("skin"):
+		lines.append("스킨: " + ShopData.SKINS[p.skin].title)
+	var o := UI.overlay(self, 860.0)
+	var dim: Control = o[0]
+	var vb: VBoxContainer = o[1]
+	vb.add_child(UI.label("구매 완료!", 56, UI.STAR_ON))
+	vb.add_child(UI.label("\n".join(lines), 38))
+	if p.has("skin"):
+		var eq := UI.button("지금 장착하기", 120, 42)
+		eq.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
+		eq.pressed.connect(func():
+			GameState.set_skin(p.skin)
+			GameState.go(GameState.SCENE_HOME))
+		vb.add_child(eq)
+	var ok := UI.button("확인", 100, 38)
+	ok.pressed.connect(func(): dim.queue_free())
+	vb.add_child(ok)
+
