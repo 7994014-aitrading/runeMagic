@@ -136,6 +136,23 @@ func _draw_wizard() -> void:
 	var foot := sz.y * 140.0 / 164.0
 	_wizard.draw_texture_rect(tex, Rect2(center + Vector2(-sz.x / 2.0, 190 - foot), sz), false)
 
+var _back_at := -10.0
+var _back_label: Label
+
+## 뒤로가기: 들어온 직후(앞 화면의 뒤로가기)는 무시, 2초 안에 두 번 눌러야 종료
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
+	if what != NOTIFICATION_WM_GO_BACK_REQUEST or _t < 0.6:
+		return
+	if _t - _back_at < 2.0:
 		get_tree().quit()
+		return
+	_back_at = _t
+	if _back_label == null:
+		_back_label = UI.label("한 번 더 누르면 종료합니다", 32, UI.TEXT)
+		_back_label.position = Vector2(140, size.y - 260)
+		_back_label.size = Vector2(800, 60)
+		add_child(_back_label)
+	_back_label.visible = true
+	get_tree().create_timer(2.0).timeout.connect(func():
+		if is_instance_valid(_back_label):
+			_back_label.visible = false)
