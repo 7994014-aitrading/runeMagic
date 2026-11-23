@@ -1,0 +1,12 @@
+[gd_resource type="Resource" script_class="EnemyData" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/enemy_data.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+display_name = "떼거리"
+hp = 14.0
+speed = 110.0
+radius = 18.0
+color = Color(0.45, 0.85, 0.4, 1)
+castle_damage = 1

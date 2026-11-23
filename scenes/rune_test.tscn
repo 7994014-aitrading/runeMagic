@@ -1,0 +1,54 @@
+[gd_scene load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/main.gd" id="1"]
+[ext_resource type="Resource" path="res://data/rune_config.tres" id="2"]
+[ext_resource type="Script" path="res://scripts/dummy.gd" id="3"]
+[ext_resource type="Script" path="res://scripts/wizard.gd" id="4"]
+[ext_resource type="Script" path="res://scripts/stroke_input.gd" id="5"]
+
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+config = ExtResource("2")
+
+[node name="Dummy" type="Node2D" parent="."]
+position = Vector2(540, 480)
+script = ExtResource("3")
+
+[node name="Projectiles" type="Node2D" parent="."]
+
+[node name="Wizard" type="Node2D" parent="." node_paths=PackedStringArray("projectile_parent")]
+position = Vector2(540, 1480)
+script = ExtResource("4")
+config = ExtResource("2")
+projectile_parent = NodePath("../Projectiles")
+
+[node name="StrokeInput" type="Node2D" parent="."]
+script = ExtResource("5")
+
+[node name="HUD" type="CanvasLayer" parent="."]
+
+[node name="ResultLabel" type="Label" parent="HUD"]
+offset_left = 40.0
+offset_top = 1030.0
+offset_right = 1040.0
+offset_bottom = 1140.0
+mouse_filter = 2
+theme_override_font_sizes/font_size = 84
+horizontal_alignment = 1
+
+[node name="DetailLabel" type="Label" parent="HUD"]
+offset_left = 40.0
+offset_top = 1140.0
+offset_right = 1040.0
+offset_bottom = 1260.0
+mouse_filter = 2
+theme_override_font_sizes/font_size = 34
+horizontal_alignment = 1
+
+[node name="ResetButton" type="Button" parent="HUD"]
+offset_left = 820.0
+offset_top = 60.0
+offset_right = 1040.0
+offset_bottom = 150.0
+theme_override_font_sizes/font_size = 34
+text = "합계 초기화"

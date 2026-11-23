@@ -1,0 +1,74 @@
+[gd_resource type="Resource" script_class="UpgradeList" load_steps=11 format=3]
+
+[ext_resource type="Script" path="res://scripts/upgrade_list.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/upgrade_data.gd" id="2"]
+
+[sub_resource type="Resource" id="burn"]
+script = ExtResource("2")
+id = "burn"
+title = "화상 강화"
+description = "화상 피해 +40%"
+amount = 0.4
+max_stacks = 3
+
+[sub_resource type="Resource" id="slow"]
+script = ExtResource("2")
+id = "slow"
+title = "감속 강화"
+description = "더 느리게(-15%p), 지속 +1초"
+amount = 0.15
+amount_b = 1.0
+max_stacks = 2
+
+[sub_resource type="Resource" id="chain"]
+script = ExtResource("2")
+id = "chain"
+title = "연쇄 +1"
+description = "번개가 1명 더 튄다"
+amount = 1.0
+max_stacks = 3
+
+[sub_resource type="Resource" id="duration"]
+script = ExtResource("2")
+id = "duration"
+title = "룬 지속 +2초"
+description = "모든 판정 단계의 지속 +2초"
+amount = 2.0
+max_stacks = 3
+
+[sub_resource type="Resource" id="attack_speed"]
+script = ExtResource("2")
+id = "attack_speed"
+title = "공격 속도 +10%"
+description = "기본 공격 간격 10% 감소"
+amount = 0.1
+max_stacks = 4
+
+[sub_resource type="Resource" id="perfect_range"]
+script = ExtResource("2")
+id = "perfect_range"
+title = "완벽 판정 넓힘"
+description = "완벽 기준 점수 -0.02"
+amount = 0.02
+max_stacks = 2
+
+[sub_resource type="Resource" id="burst"]
+script = ExtResource("2")
+id = "burst"
+title = "완벽 시 속성 폭발"
+description = "완벽으로 그리면 그린 자리 주변 적에게 속성 + 피해"
+amount = 260.0
+amount_b = 20.0
+max_stacks = 1
+
+[sub_resource type="Resource" id="slot"]
+script = ExtResource("2")
+id = "slot"
+title = "룬 칸 +1"
+description = "속성 2개 동시 적용, 번갈아 발사"
+amount = 1.0
+max_stacks = 1
+
+[resource]
+script = ExtResource("1")
+items = Array[Resource]([SubResource("burn"), SubResource("slow"), SubResource("chain"), SubResource("duration"), SubResource("attack_speed"), SubResource("perfect_range"), SubResource("burst"), SubResource("slot")])

@@ -1,0 +1,48 @@
+[gd_resource type="Resource" script_class="BossTraitList" load_steps=7 format=3]
+
+[ext_resource type="Script" path="res://scripts/boss_trait_list.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/boss_trait.gd" id="2"]
+
+[sub_resource type="Resource" id="shield"]
+script = ExtResource("2")
+id = "shield"
+title = "속성 방패"
+icon_text = "방"
+category = "defense"
+amount = 0.5
+duration = 5.0
+count = 3
+multiplier = 1.5
+
+[sub_resource type="Resource" id="regen"]
+script = ExtResource("2")
+id = "regen"
+title = "재생"
+icon_text = "재"
+category = "defense"
+amount = 0.015
+
+[sub_resource type="Resource" id="summon"]
+script = ExtResource("2")
+id = "summon"
+title = "소환"
+icon_text = "소"
+category = "action"
+interval = 8.0
+count = 4
+max_count = 12
+
+[sub_resource type="Resource" id="charge"]
+script = ExtResource("2")
+id = "charge"
+title = "돌진"
+icon_text = "돌"
+category = "action"
+interval = 6.0
+duration = 2.0
+warn_time = 1.5
+multiplier = 3.0
+
+[resource]
+script = ExtResource("1")
+items = Array[Resource]([SubResource("shield"), SubResource("regen"), SubResource("summon"), SubResource("charge")])
