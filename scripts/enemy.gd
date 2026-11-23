@@ -38,6 +38,8 @@ var charge_phase := 0  # 0 대기, 1 예고, 2 돌진
 var _charge_phase_t := 0.0
 var _anim_t := 0.0  # 걷기 애니메이션 시간 (이동 속도에 맞춰 흐름)
 var _sheet = null  # Art.enemy_sheet() 결과 (없으면 도형)
+var title := ""  # 보스 이름
+var scale_mult := 1.0  # 보스 크기 배율
 
 func spawn(d: EnemyData, pos: Vector2, hp_mult := 1.0, trait_list: Array = [], owner: Enemy = null, boss := false) -> void:
 	data = d
@@ -72,6 +74,9 @@ func spawn(d: EnemyData, pos: Vector2, hp_mult := 1.0, trait_list: Array = [], o
 	charge_phase = 0
 	_anim_t = randf() * 2.0
 	_sheet = Art.enemy_sheet(d.sprite)
+	title = ""
+	scale_mult = 1.0
+	material = null
 	active = true
 	visible = true
 	add_to_group("targets")
@@ -246,6 +251,9 @@ func _draw() -> void:
 		var h := 14.0 if is_boss else 8.0
 		draw_rect(Rect2(-w / 2, -r - 22, w, h), Color(0.15, 0.15, 0.15))
 		draw_rect(Rect2(-w / 2, -r - 22, w * clampf(hp / max_hp, 0, 1), h), Color(0.9, 0.25, 0.25))
+	if title != "":
+		draw_string_outline(font, Vector2(-200, -r - 84), title, HORIZONTAL_ALIGNMENT_CENTER, 400, 30, 8, Color(0, 0, 0))
+		draw_string(font, Vector2(-200, -r - 84), title, HORIZONTAL_ALIGNMENT_CENTER, 400, 30, Color(1.0, 0.8, 0.5))
 	# 특성 아이콘 (보스)
 	for i in traits.size():
 		var t: BossTrait = traits[i]
@@ -274,7 +282,7 @@ func sprite_frame() -> int:
 	return int(_anim_t * WALK_FPS) % int(_sheet.cols) if _sheet != null else 0
 
 func sprite_size() -> Vector2:
-	return Vector2(_sheet.fw, _sheet.fh) * data.sprite_scale if _sheet != null else Vector2.ZERO
+	return Vector2(_sheet.fw, _sheet.fh) * data.sprite_scale * scale_mult if _sheet != null else Vector2.ZERO
 
 ## 그림을 그리고, 체력 바·아이콘을 붙일 반지름을 돌려준다
 func _draw_sprite(r: float) -> float:

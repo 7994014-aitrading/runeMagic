@@ -9,6 +9,7 @@ signal wave_cleared(wave: int)
 signal reaction_triggered(name: String)
 signal boss_spawned(boss: Enemy)
 signal castle_hit(damage: int)
+signal defeat_pending  # 성이 무너짐: 이어하기를 물어볼 차례 (allow_continue일 때만)
 
 @export var combat: CombatConfig
 @export var runner: EnemyData
@@ -29,6 +30,9 @@ var speed_scale := 1.0
 ## 스테이지 설정 (main.gd가 판 시작 전에 정한다)
 var enemy_hp_mult := 1.0  # 일반 적·졸개 체력 배율
 var allow_shield := true  # 방패 특성 허용 (룬 3개가 다 있어야 깰 수 있음)
+var boss_title := ""  # 보스 이름 (보스 머리 위에 표시)
+var boss_hue := 0.0  # 보스 로브 색 회전
+var boss_scale := 1.0  # 보스 그림 배율
 
 var running := false  # 판이 끝나지 않았음
 var fighting := false  # 웨이브 진행 중
@@ -42,6 +46,9 @@ var stats := {"direct": 0.0, "burn": 0.0, "chain": 0.0, "reaction": 0.0, "burst"
 var reaction_counts := {"증기 폭발": 0, "화상 전파": 0, "빙결": 0}
 var result_text := ""
 var start_wave := 1  # debug: start from this wave
+var allow_continue := false  # 이번 판에 이어하기를 물어볼지 (판마다 1번)
+var _pending_defeat := false
+var _leaked_boss := {}  # 마지막 보스가 성을 넘었을 때 상태 (이어하면 다시 내보낸다)
 var test_mode := false  # boss combo test: no wave flow
 var summon_cap_hits := 0
 var _rng := RandomNumberGenerator.new()
@@ -97,6 +104,8 @@ func start() -> void:
 	wave = start_wave - 1
 	_rng.seed = seed
 	summon_cap_hits = 0
+	_pending_defeat = false
+	_leaked_boss = {}
 	running = true
 	next_wave()
 
@@ -205,6 +214,9 @@ func deal_damage(e: Enemy, amount: float, source: String, element: int = Element
 					o.despawn()
 
 func enemy_reached(e: Enemy) -> void:
+	if _pending_defeat:
+		e.despawn()
+		return
 	leaks += 1
 	if e.is_boss:
 		var names := []
@@ -214,12 +226,47 @@ func enemy_reached(e: Enemy) -> void:
 	if not invincible:
 		castle_hp -= e.data.castle_damage
 		castle_hit.emit(e.data.castle_damage)
-	e.despawn()
 	if e.is_boss and wave >= combat.wave_count and not invincible:
 		castle_hp = 0  # final boss got through = defeat
+		_leaked_boss = {"hp": e.hp, "max_hp": e.max_hp, "traits": e.traits, "shield": e.shield_element}
+	e.despawn()
 	if castle_hp <= 0:
 		castle_hp = 0
+		_lose()
+
+func _lose() -> void:
+	if allow_continue:
+		allow_continue = false
+		_pending_defeat = true
+		defeat_pending.emit()
+	else:
 		_end(false)
+
+## 이어하기: 성 체력 일부 회복, 성 가까운 적 정리, 넘어간 마지막 보스는 위에서 다시
+func revive(ratio := 0.5) -> void:
+	if not _pending_defeat:
+		return
+	_pending_defeat = false
+	castle_hp = maxi(int(ceil(combat.castle_hp * ratio)), 1)
+	_rings.append({"pos": Vector2(540, castle_y), "r": 700.0, "t": 0.5, "color": Color(1.0, 0.85, 0.4)})
+	for o in active_enemies():
+		if o.position.y > castle_y - 500.0 and not o.is_boss:
+			_add_death(o)
+			o.despawn()
+	if not _leaked_boss.is_empty():
+		var e := _free_enemy()
+		if e != null:
+			e.spawn(boss, Vector2(540, -100 - field_extra), 1.0, _leaked_boss.traits, null, true)
+			_dress_boss(e)
+			e.max_hp = _leaked_boss.max_hp
+			e.hp = _leaked_boss.hp
+			if _leaked_boss.shield != Element.NONE:
+				e.shield_element = _leaked_boss.shield
+		_leaked_boss = {}
+
+func confirm_defeat() -> void:
+	_pending_defeat = false
+	_end(false)
 
 ## damage: direct hit (empowered already applied) / base_damage: before empowered, used for chain
 func on_projectile_hit(e: Enemy, damage: float, element: int, base_damage: float) -> void:
@@ -364,6 +411,7 @@ func _spawn_entry(e: Enemy, s: Dictionary, rng: RandomNumberGenerator) -> void:
 		var bi: int = s.boss
 		var traits := pick_traits(combat.boss_trait_counts[bi], rng)
 		e.spawn(s.data, Vector2(s.x, s.y - field_extra), combat.boss_hp_multipliers[bi], traits, null, true)
+		_dress_boss(e)
 		boss_spawned.emit(e)
 	else:
 		e.spawn(s.data, Vector2(s.x, s.y - field_extra), enemy_hp_mult)
@@ -529,3 +577,13 @@ func _add_death(e: Enemy) -> void:
 	var sh = e._sheet
 	_deaths.append({"tex": sh.tex, "src": Rect2(e.sprite_frame() * sh.fw, 0, sh.fw, sh.fh),
 		"pos": e.position, "size": e.sprite_size(), "t": 0.0})
+
+## 스테이지 보스 모습: 로브 색(스킨과 같은 색 변형 재질, 파란 로브 기준)·크기·이름
+func _dress_boss(e: Enemy) -> void:
+	e.title = boss_title
+	e.scale_mult = boss_scale
+	if absf(boss_hue) > 0.001:
+		var m := UI.skin_material({"hue": boss_hue, "sat": 1.1, "val": 1.0})
+		m.set_shader_parameter("target", 0.55)
+		m.set_shader_parameter("width", 0.14)
+		e.material = m

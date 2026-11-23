@@ -20,6 +20,13 @@ extends Resource
 ## 스테이지별 보스 특성 수 (1-1은 0: 튜토리얼)
 @export var boss_trait_counts: PackedInt32Array = PackedInt32Array([0, 1, 1, 1, 1, 1, 1, 1, 1, 2])
 
+@export_group("보스 모습")
+## 스테이지별 보스 이름·로브 색 변화(색상 회전)·크기 배율
+@export var boss_names: PackedStringArray = PackedStringArray(["견습 번개술사", "서리 사도", "폭풍의 사제", "잿빛 주술사",
+	"심연의 감시자", "황혼의 마녀", "독안개 현자", "피의 대주교", "그림자 군주", "룬을 삼킨 자"])
+@export var boss_hues: PackedFloat32Array = PackedFloat32Array([0.0, -0.06, 0.22, 0.5, -0.18, 0.3, -0.3, 0.45, 0.14, 0.62])
+@export var boss_scale_growth: float = 0.05
+
 @export_group("룬 해금")
 ## 이 스테이지에 처음 들어갈 수 있게 되면 해금 (불은 처음부터)
 @export var ice_unlock_stage: int = 2
@@ -72,3 +79,9 @@ func stage_seed(s: int) -> int:
 
 func stage_name(s: int) -> String:
 	return "1-%d" % s
+
+func boss_name(s: int) -> String:
+	return boss_names[clampi(s - 1, 0, boss_names.size() - 1)]
+
+func boss_hue(s: int) -> float:
+	return boss_hues[clampi(s - 1, 0, boss_hues.size() - 1)]

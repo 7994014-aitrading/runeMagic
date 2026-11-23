@@ -35,6 +35,9 @@ static func open(parent: Node, on_close: Callable = Callable()) -> Control:
 		reset.text = "초기화했습니다"
 		reset.disabled = true)
 	vb.add_child(reset)
+	var credits := UI.button("크레딧", 90, 32)
+	credits.pressed.connect(func(): open_credits(parent))
+	vb.add_child(credits)
 	var close := UI.button("닫기")
 	close.pressed.connect(func():
 		dim.queue_free()
@@ -42,3 +45,16 @@ static func open(parent: Node, on_close: Callable = Callable()) -> Control:
 			on_close.call())
 	vb.add_child(close)
 	return dim
+
+const CREDITS := """[ 룬 마법 디펜스 · 데모 ]
+
+캐릭터·몬스터 그림  GegX
+마법 이펙트  Mira Forge
+음악·효과음  pixel-boy & AAA (Ninja Adventure)
+속성 타격음  lentikula
+글꼴  Galmuri (quiple, SIL OFL 1.1)
+엔진  Godot Engine"""
+
+static func open_credits(parent: Node) -> void:
+	UI.notice(parent, "크레딧", CREDITS)
+

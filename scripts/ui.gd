@@ -136,3 +136,125 @@ static func draw_rune(ci: CanvasItem, element: int, center: Vector2, size: float
 	c.a = alpha
 	ci.draw_polyline(pts, c, width, true)
 	ci.draw_circle(pts[0], width * 1.4, Color(1, 1, 1, alpha))
+
+# ---- 공통 막대: 위(재화) · 아래(탭) ----
+
+const NAV := [
+	["store", "상점", "res://scenes/store.tscn"],
+	["perm", "강화", "res://scenes/perm_shop.tscn"],
+	["home", "홈", "res://scenes/home.tscn"],
+	["skins", "스킨", "res://scenes/skins.tscn"],
+	["practice", "연습", "res://scenes/rune_test.tscn"],
+]
+
+## 화면 맨 아래 탭 막대. current = 지금 탭 id
+static func bottom_nav(parent: Control, current: String) -> Control:
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 8)
+	bar.anchor_left = 0.0
+	bar.anchor_right = 1.0
+	bar.anchor_top = 1.0
+	bar.anchor_bottom = 1.0
+	bar.offset_left = 16
+	bar.offset_right = -16
+	bar.offset_top = -170
+	bar.offset_bottom = -20
+	parent.add_child(bar)
+	for it in NAV:
+		var b := button(it[1], 150, 36)
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		if it[0] == current:
+			b.add_theme_stylebox_override("normal", box(Color(0.3, 0.26, 0.16), GOLD, 16, 4))
+			b.add_theme_color_override("font_color", GOLD)
+		else:
+			var path: String = it[2]
+			b.pressed.connect(func(): GameState.go(path))
+		bar.add_child(b)
+	return bar
+
+## 화면 맨 위 재화 막대: 마력석 · 수정(+ → 상점). 반환: 막대
+static func wallet_bar(parent: Control, show_settings := true) -> Control:
+	var bar := HBoxContainer.new()
+	bar.add_theme_constant_override("separation", 14)
+	bar.position = Vector2(24, 30)
+	bar.size = Vector2(1032, 100)
+	parent.add_child(bar)
+	var stones := _pill("마력석", STAR_ON)
+	var gems := _pill("수정", Color(0.6, 0.85, 1.0))
+	bar.add_child(stones)
+	bar.add_child(gems)
+	var plus := button("+", 90, 44)
+	plus.custom_minimum_size.x = 90
+	plus.pressed.connect(func(): GameState.go("res://scenes/store.tscn"))
+	bar.add_child(plus)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	bar.add_child(spacer)
+	if show_settings:
+		var gear := button("설정", 90, 32)
+		gear.custom_minimum_size.x = 130
+		gear.pressed.connect(func(): SettingsPanel.open(parent))
+		bar.add_child(gear)
+	var refresh := func():
+		stones.get_child(0).text = "마력석 %d" % GameState.stones()
+		gems.get_child(0).text = "수정 %d" % GameState.gems()
+	refresh.call()
+	GameState.wallet_changed.connect(refresh)
+	bar.tree_exiting.connect(func(): GameState.wallet_changed.disconnect(refresh))
+	return bar
+
+static func _pill(text: String, color: Color) -> PanelContainer:
+	var p := PanelContainer.new()
+	var sb := box(Color(0.08, 0.08, 0.12, 0.9), color.darkened(0.3), 40, 3)
+	sb.content_margin_left = 26
+	sb.content_margin_right = 26
+	p.add_theme_stylebox_override("panel", sb)
+	p.custom_minimum_size = Vector2(250, 90)
+	var l := label(text, 34, color)
+	l.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	p.add_child(l)
+	return p
+
+## 테스트 결제 확인 창. 확인하면 on_ok 호출.
+static func confirm_purchase(parent: Node, title: String, price: String, on_ok: Callable) -> void:
+	var o := overlay(parent, 860.0)
+	var dim: Control = o[0]
+	var vb: VBoxContainer = o[1]
+	vb.add_child(label(title, 48, GOLD))
+	vb.add_child(label(price, 44, TEXT))
+	vb.add_child(label("테스트 결제입니다. 실제로 돈이 나가지 않습니다.", 30, BAD))
+	var ok := button("구매", 120, 44)
+	ok.pressed.connect(func():
+		dim.queue_free()
+		on_ok.call())
+	vb.add_child(ok)
+	var cancel := button("취소", 100, 36)
+	cancel.pressed.connect(func(): dim.queue_free())
+	vb.add_child(cancel)
+
+## 짧은 알림 창 (확인 하나)
+static func notice(parent: Node, title: String, body: String) -> void:
+	var o := overlay(parent, 860.0)
+	var dim: Control = o[0]
+	var vb: VBoxContainer = o[1]
+	vb.add_child(label(title, 52, GOLD))
+	if body != "":
+		vb.add_child(label(body, 36))
+	var ok := button("확인", 110, 40)
+	ok.pressed.connect(func(): dim.queue_free())
+	vb.add_child(ok)
+
+## 원 스타일 시간 표시 (예: 71:59:30)
+static func hms(sec: int) -> String:
+	return "%d:%02d:%02d" % [sec / 3600, (sec / 60) % 60, sec % 60]
+
+const HUE_SHADER := preload("res://scripts/hue_shift.gdshader")
+
+## 스킨 색 변형 재질 (ShopData.SKINS 항목)
+static func skin_material(skin: Dictionary) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = HUE_SHADER
+	m.set_shader_parameter("hue", skin.get("hue", 0.0))
+	m.set_shader_parameter("sat", skin.get("sat", 1.0))
+	m.set_shader_parameter("val", skin.get("val", 1.0))
+	return m

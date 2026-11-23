@@ -17,8 +17,19 @@ const SPRITE_SCALE := 1.6
 const FOOT_Y := 60.0  # 발이 닿는 로컬 y
 const TIP := Vector2(57, -92)  # 그림 속 지팡이 수정 위치 (속성 빛)
 
+var _body: Node2D  # 그림만 (스킨 색 변형 재질)
+var _glow: Node2D  # 지팡이 빛 (재질 영향 없이 그림 위에)
+
 func _ready() -> void:
 	_frames = Art.wizard_frames("north")
+	_body = Node2D.new()
+	_body.material = UI.skin_material(GameState.skin())
+	_body.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	add_child(_body)
+	_body.draw.connect(_draw_body)
+	_glow = Node2D.new()
+	add_child(_glow)
+	_glow.draw.connect(_draw_glow)
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	for i in config.slot_count:
 		slots.append({"element": Element.NONE, "time_left": 0.0, "duration": 1.0})
@@ -147,14 +158,26 @@ func _draw_sprite() -> void:
 	draw_set_transform(Vector2(0, FOOT_Y), 0.0, Vector2(1.0, 0.3))
 	draw_circle(Vector2.ZERO, size.x * 0.25, Color(0, 0, 0, 0.35))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
-	draw_texture_rect(tex, Rect2(Vector2(-size.x / 2.0, FOOT_Y - foot), size), false)
+	_body.queue_redraw()
+	_glow.queue_redraw()
+
+func _draw_body() -> void:
+	if _frames.is_empty():
+		return
+	var tex: Texture2D = _frames[int(_t * 12.0) % _frames.size()]
+	var size := Vector2(tex.get_width(), tex.get_height()) * SPRITE_SCALE
+	var foot := size.y * 140.0 / 164.0
+	_body.draw_texture_rect(tex, Rect2(Vector2(-size.x / 2.0, FOOT_Y - foot), size), false)
+
+func _draw_glow() -> void:
 	var tip := _tip_element()
-	if tip != Element.NONE:
-		var c := Element.color_of(tip)
-		var pulse := 0.5 + 0.5 * sin(_t * 6.0)
-		draw_circle(TIP, 30.0 + 6.0 * pulse, Color(c, 0.25))
-		draw_circle(TIP, 15.0, Color(c, 0.75))
-		draw_circle(TIP, 6.0, Color(1, 1, 1, 0.9))
+	if _frames.is_empty() or tip == Element.NONE:
+		return
+	var c := Element.color_of(tip)
+	var pulse := 0.5 + 0.5 * sin(_t * 6.0)
+	_glow.draw_circle(TIP, 30.0 + 6.0 * pulse, Color(c, 0.25))
+	_glow.draw_circle(TIP, 15.0, Color(c, 0.75))
+	_glow.draw_circle(TIP, 6.0, Color(1, 1, 1, 0.9))
 
 func _tip_element() -> int:
 	for s in slots:

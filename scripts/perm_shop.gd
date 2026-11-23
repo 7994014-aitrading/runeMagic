@@ -14,18 +14,18 @@ func _ready() -> void:
 	bg.show_behind_parent = true
 	add_child(bg)
 	UI.fill(bg)
-	var bar := UI.top_bar(self, "영구 강화")
-	bar[0].pressed.connect(func(): GameState.go(GameState.SCENE_TITLE))
-	_stones_label = bar[2]
+	UI.wallet_bar(self)
+	UI.bottom_nav(self, "perm")
+	_stones_label = Label.new()  # 재화는 위 막대가 보여준다
 	_list = VBoxContainer.new()
 	_list.add_theme_constant_override("separation", 30)
-	_list.position = Vector2(60, 200)
+	_list.position = Vector2(60, 180)
 	_list.size = Vector2(960, 0)
 	add_child(_list)
 	_refresh()
 
 func _refresh() -> void:
-	_stones_label.text = "마력석 %d" % GameState.data.stones
+	_list.add_child(UI.label("영구 강화", 48, UI.GOLD))
 	for c in _list.get_children():
 		c.queue_free()
 	for u in GameState.perm_list.items:
@@ -61,10 +61,12 @@ func _row(u: PermUpgradeData) -> Control:
 		b.disabled = not GameState.can_buy(u.id)
 		b.pressed.connect(func():
 			if GameState.buy(u.id):
+				GameState.sfx("upgrade")
+				GameState.wallet_changed.emit()
 				_refresh())
 	hb.add_child(b)
 	return panel
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST:
-		GameState.go(GameState.SCENE_TITLE)
+		GameState.go(GameState.SCENE_HOME)

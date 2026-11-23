@@ -7,6 +7,11 @@ const SCENE_MAP := "res://scenes/stage_map.tscn"
 const SCENE_BATTLE := "res://scenes/main.tscn"
 const SCENE_SHOP := "res://scenes/perm_shop.tscn"
 const SCENE_PRACTICE := "res://scenes/rune_test.tscn"
+const SCENE_HOME := "res://scenes/home.tscn"
+const SCENE_STORE := "res://scenes/store.tscn"
+const SCENE_SKINS := "res://scenes/skins.tscn"
+
+signal wallet_changed  # 마력석·수정이 바뀌면 (위 막대 갱신용)
 
 var chapter: ChapterConfig = preload("res://data/chapter1.tres")
 var perm_list: UpgradeList = preload("res://data/perm_upgrades.tres")
@@ -35,6 +40,14 @@ func _defaults() -> Dictionary:
 		"perm": {},  # id → level
 		"tutorial": {},  # 키 → true (s1, s2, s3, upgrade, shield)
 		"settings": {"sfx": true, "music": true, "vibration": true, "dev": false},
+		"gems": 0,
+		"skin": "default",
+		"skins": ["default"],
+		"daily": {"last": "", "count": 0},  # 마지막 출석 날짜, 받은 횟수
+		"starter": {"until": 0, "bought": false},  # 스타터 팩 마감 (유닉스 초)
+		"pass": {"days_left": 0, "last": ""},  # 월정액 남은 일수, 마지막 지급 날짜
+		"continue_trial": false,  # 무료 이어하기 체험을 썼는지
+		"purchases": [],  # 테스트 결제 기록 [id]
 	}
 
 func load_game() -> void:
@@ -104,9 +117,20 @@ func record_result(s: int, won: bool, wave_reached: int, castle_ratio: float) ->
 		info.stars = maxi(int(info.get("stars", 0)), out.stars)
 	else:
 		out.stones = chapter.loss_reward_per_wave * maxi(wave_reached - 1, 0)
+	out.gems = 0
+	if won:
+		if out.stars == 3 and int(stage_info(s).get("stars", 0)) < 3:
+			out.gems += 10  # 첫 별 3개
+		if out.first_clear and (s == 5 or s == chapter.stage_count):
+			out.gems += 50
+		if out.first_clear and s == ShopData.STARTER_AFTER_STAGE and not data.starter.bought:
+			data.starter.until = int(Time.get_unix_time_from_system()) + ShopData.STARTER_HOURS * 3600
+			out.starter = true
 	info.best_wave = maxi(int(info.get("best_wave", 0)), wave_reached)
 	data.stages[str(s)] = info
 	data.stones = int(data.stones) + out.stones
+	data.gems = int(data.gems) + out.gems
+	wallet_changed.emit()
 	for e in runes():
 		if not before.has(e):
 			out.new_runes.append(e)
@@ -247,3 +271,132 @@ func music(name: String) -> void:
 		st.loop = true
 	_music_player.stream = st
 	_music_player.play()
+
+# ---- 재화 · 상점 (데모: 테스트 결제) ----
+
+func gems() -> int:
+	return int(data.gems)
+
+func stones() -> int:
+	return int(data.stones)
+
+func spend_gems(n: int) -> bool:
+	if gems() < n:
+		return false
+	data.gems = gems() - n
+	save_game()
+	wallet_changed.emit()
+	return true
+
+func add_stones(n: int) -> void:
+	data.stones = stones() + n
+	save_game()
+	wallet_changed.emit()
+
+## 상품 지급 (테스트 결제 확인 뒤, 나중엔 결제 플러그인 콜백에서 호출)
+func grant(product_id: String) -> void:
+	var p: Dictionary = ShopData.PRODUCTS[product_id]
+	data.gems = gems() + int(p.get("gems", 0))
+	data.stones = stones() + int(p.get("stones", 0))
+	if p.has("skin") and not data.skins.has(p.skin):
+		data.skins.append(p.skin)
+	if p.has("pass_days"):
+		data.pass.days_left = int(data.pass.days_left) + int(p.pass_days)
+		data.pass.last = _today()  # 오늘 몫은 즉시 지급분으로 대신
+	if product_id == "starter":
+		data.starter.bought = true
+	data.purchases.append(product_id)
+	save_game()
+	wallet_changed.emit()
+
+func can_buy_product(product_id: String) -> bool:
+	var p: Dictionary = ShopData.PRODUCTS[product_id]
+	if p.get("once", false) and data.purchases.has(product_id):
+		return false
+	if product_id == "starter":
+		return starter_active()
+	return true
+
+func exchange(id: String) -> bool:
+	var e: Dictionary = ShopData.EXCHANGE[id]
+	if not spend_gems(int(e.cost)):
+		return false
+	add_stones(int(e.stones))
+	return true
+
+func starter_active() -> bool:
+	return not data.starter.bought and int(data.starter.until) > int(Time.get_unix_time_from_system())
+
+func starter_seconds_left() -> int:
+	return maxi(int(data.starter.until) - int(Time.get_unix_time_from_system()), 0)
+
+# ---- 스킨 ----
+
+func owns_skin(id: String) -> bool:
+	return data.skins.has(id)
+
+func buy_skin(id: String) -> bool:
+	var cost := int(ShopData.SKINS[id].cost)
+	if owns_skin(id) or cost <= 0 or not spend_gems(cost):
+		return false
+	data.skins.append(id)
+	save_game()
+	return true
+
+func set_skin(id: String) -> void:
+	if owns_skin(id):
+		data.skin = id
+		save_game()
+
+func skin() -> Dictionary:
+	return ShopData.SKINS.get(data.skin, ShopData.SKINS["default"])
+
+# ---- 출석 · 월정액 ----
+
+func _today() -> String:
+	return Time.get_date_string_from_system()
+
+func daily_available() -> bool:
+	return data.daily.last != _today()
+
+## 오늘 받을 보상 [마력석, 수정]과 몇 일째인지
+func daily_reward() -> Array:
+	var i := int(data.daily.count) % ShopData.DAILY.size()
+	return [ShopData.DAILY[i][0], ShopData.DAILY[i][1], i + 1]
+
+func claim_daily() -> Array:
+	if not daily_available():
+		return []
+	var r := daily_reward()
+	data.daily.last = _today()
+	data.daily.count = int(data.daily.count) + 1
+	data.stones = stones() + r[0]
+	data.gems = gems() + r[1]
+	save_game()
+	wallet_changed.emit()
+	return r
+
+func pass_active() -> bool:
+	return int(data.pass.days_left) > 0
+
+## 월정액 오늘 몫 지급 (홈에 들어올 때). 받은 수정 수를 돌려준다.
+func claim_pass() -> int:
+	if not pass_active() or data.pass.last == _today():
+		return 0
+	data.pass.last = _today()
+	data.pass.days_left = int(data.pass.days_left) - 1
+	data.gems = gems() + ShopData.PASS_DAILY
+	save_game()
+	wallet_changed.emit()
+	return ShopData.PASS_DAILY
+
+## 이어하기 비용 (첫 번째는 무료 체험)
+func continue_cost() -> int:
+	return 0 if not data.continue_trial else ShopData.CONTINUE_COST
+
+func pay_continue() -> bool:
+	if not data.continue_trial:
+		data.continue_trial = true
+		save_game()
+		return true
+	return spend_gems(ShopData.CONTINUE_COST)

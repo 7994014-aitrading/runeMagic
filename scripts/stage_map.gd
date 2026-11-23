@@ -18,7 +18,7 @@ func _ready() -> void:
 	add_child(bg)
 	UI.fill(bg)
 	var bar := UI.top_bar(self, GameState.chapter.title, "마력석 %d" % GameState.data.stones)
-	bar[0].pressed.connect(func(): GameState.go(GameState.SCENE_TITLE))
+	bar[0].pressed.connect(func(): GameState.go(GameState.SCENE_HOME))
 	resized.connect(_layout)
 	_layout()
 
@@ -92,6 +92,7 @@ func _show_info(s: int) -> void:
 	var tnames := []
 	for t in traits:
 		tnames.append(t.title)
+	lines.append("보스: %s" % ch.boss_name(s))
 	lines.append("보스 특성: " + (" · ".join(tnames) if not tnames.is_empty() else "없음"))
 	lines.append("적 체력 x%.2f · 보스 체력 x%.2f" % [ch.enemy_hp_mult(s), ch.boss_hp_mult(s)])
 	var names := []
@@ -118,4 +119,4 @@ func _notification(what: int) -> void:
 			_info.queue_free()
 			_info = null
 		else:
-			GameState.go(GameState.SCENE_TITLE)
+			GameState.go(GameState.SCENE_HOME)

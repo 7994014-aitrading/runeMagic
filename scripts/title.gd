@@ -32,23 +32,14 @@ func _build() -> void:
 	_gap.custom_minimum_size = Vector2(0, 420)
 	box.add_child(_gap)
 
-	if GameState.is_first_run():
-		var start := UI.button("시작하기", 150, 56)
-		start.pressed.connect(func(): GameState.start_stage(1))
-		box.add_child(start)
-	else:
-		var stones := UI.label("마력석 %d  ·  별 %d / %d" % [GameState.data.stones, GameState.total_stars(),
-			GameState.chapter.stage_count * 3], 34, UI.STAR_ON)
-		box.add_child(stones)
-		var play := UI.button("스테이지", 140, 52)
-		play.pressed.connect(func(): GameState.go(GameState.SCENE_MAP))
-		box.add_child(play)
-		var shop := UI.button("영구 강화")
-		shop.pressed.connect(func(): GameState.go(GameState.SCENE_SHOP))
-		box.add_child(shop)
-		var practice := UI.button("룬 연습")
-		practice.pressed.connect(func(): GameState.go(GameState.SCENE_PRACTICE))
-		box.add_child(practice)
+	# 첫 실행이면 1-1 튜토리얼로 바로, 아니면 홈으로
+	var start := UI.button("시작하기", 150, 56)
+	start.pressed.connect(func():
+		if GameState.is_first_run():
+			GameState.start_stage(1)
+		else:
+			GameState.go(GameState.SCENE_HOME))
+	box.add_child(start)
 	var settings := UI.button("설정")
 	settings.pressed.connect(func(): SettingsPanel.open(self))
 	box.add_child(settings)

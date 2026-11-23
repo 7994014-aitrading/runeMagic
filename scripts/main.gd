@@ -54,6 +54,9 @@ var _hint_label: Label
 var _hint_time := 0.0
 var _await_rune := Element.NONE  # 튜토리얼: 이 룬을 그릴 때까지 전장 정지
 var _guide_t := 0.0
+var _double_button: Button
+var _last_res := {}  # 이번 판 결과 (보상 2배용)
+var _continue_panel: Control
 
 func _ready() -> void:
 	_base_config = config
@@ -99,6 +102,7 @@ func _ready() -> void:
 		$HUD/ResultPanel/Box/Retry.pressed.connect(_restart)
 		$HUD/ResultPanel/Box/Retry.text = "다시 도전"
 		battle.reaction_triggered.connect(_on_reaction)
+		battle.defeat_pending.connect(_offer_continue)
 		battle.boss_spawned.connect(_on_boss_spawned)
 		battle.castle_hit.connect(func(_d):
 			GameState.vibrate(40)
@@ -149,6 +153,7 @@ func _new_run() -> void:
 	else:
 		_runes = GameState.runes()
 	battle.allow_shield = _runes.size() >= 3
+	battle.allow_continue = _stage > 0 and not _sim
 	recognizer = RuneRecognizer.new(config, _runes)
 	wizard.clear_slots()
 	wizard.set_slot_count(config.slot_count)
@@ -180,6 +185,9 @@ func _apply_stage() -> void:
 	c.budget_base *= bm
 	c.budget_per_wave *= bm
 	battle.enemy_hp_mult = ch.enemy_hp_mult(_stage)
+	battle.boss_title = ch.boss_name(_stage)
+	battle.boss_hue = ch.boss_hue(_stage)
+	battle.boss_scale = 1.0 + ch.boss_scale_growth * (_stage - 1)
 	if not _seed_given:
 		battle.seed = ch.stage_seed(_stage)
 	var pv := func(id: String) -> float:
@@ -561,9 +569,12 @@ func _show_result_panel(won: bool) -> void:
 	var stars := 0
 	if _stage > 0 and not _sim:
 		var res := GameState.record_result(_stage, won, b.wave, ratio)
+		_last_res = res
 		stars = res.stars
 		lines.append("스테이지 %s · 웨이브 %d / %d" % [GameState.chapter.stage_name(_stage), b.wave, b.combat.wave_count])
 		lines.append("마력석 +%d%s  (보유 %d)" % [res.stones, " · 첫 클리어 보너스 포함" if res.first_clear else "", GameState.data.stones])
+		if res.gems > 0:
+			lines.append("룬 수정 +%d" % res.gems)
 		for e in res.new_runes:
 			lines.append("새 룬 해금: %s" % Element.name_of(e))
 		if res.first_clear and _stage < GameState.chapter.stage_count:
@@ -589,7 +600,13 @@ func _show_result_panel(won: bool) -> void:
 	_next_button.visible = won and _stage > 0 and not _sim and _stage < GameState.chapter.stage_count
 	_map_button.visible = not _sim
 	_map_button.text = "맵으로" if _stage > 0 else "메뉴로"
+	var st := int(_last_res.get("stones", 0)) if _stage > 0 and not _sim else 0
+	_double_button.visible = st > 0
+	_double_button.disabled = false
+	_double_button.text = "보상 2배 · 마력석 +%d  (수정 %d)" % [st, ShopData.DOUBLE_COST]
 	$HUD/ResultPanel.visible = true
+	if _last_res.get("starter", false):
+		_offer_starter.call_deferred()
 	result_label.text = ""
 	detail_label.text = ""
 
@@ -729,6 +746,13 @@ func _build_battle_hud() -> void:
 	_next_button.pressed.connect(func(): GameState.start_stage(_stage + 1))
 	box.add_child(_next_button)
 	box.move_child(_next_button, $HUD/ResultPanel/Box/Retry.get_index())
+	_double_button = UI.button("", 110, 36)
+	_double_button.theme = UI.theme()
+	_double_button.add_theme_stylebox_override("normal", UI.box(Color(0.3, 0.2, 0.1), UI.STAR_ON, 16, 3))
+	_double_button.add_theme_color_override("font_color", UI.STAR_ON)
+	_double_button.pressed.connect(_double_reward)
+	box.add_child(_double_button)
+	box.move_child(_double_button, $HUD/ResultPanel/Box/Body.get_index() + 1)
 	_map_button = UI.button("맵으로", 110, 40)
 	_map_button.pressed.connect(_leave)
 	box.add_child(_map_button)
@@ -781,10 +805,10 @@ func _hint(text: String, secs := 5.0) -> void:
 	_hint_time = secs if secs > 0.0 else 0.0
 
 func _leave() -> void:
-	GameState.go(GameState.SCENE_MAP if _stage > 0 else GameState.SCENE_TITLE)
+	GameState.go(GameState.SCENE_MAP if _stage > 0 else GameState.SCENE_HOME)
 
 func _open_pause() -> void:
-	if _pause_panel != null or $HUD/ResultPanel.visible or not battle.running:
+	if _pause_panel != null or _continue_panel != null or $HUD/ResultPanel.visible or not battle.running:
 		return
 	stroke.cancel("일시정지")
 	get_tree().paused = true
@@ -821,7 +845,7 @@ func _close_pause() -> void:
 func _notification(what: int) -> void:
 	if battle == null:
 		if what == NOTIFICATION_WM_GO_BACK_REQUEST and dummy != null:
-			GameState.go(GameState.SCENE_TITLE)
+			GameState.go(GameState.SCENE_HOME)
 		return
 	match what:
 		NOTIFICATION_WM_GO_BACK_REQUEST:
@@ -840,11 +864,11 @@ func _notification(what: int) -> void:
 				_open_pause()
 
 func _add_practice_back() -> void:
-	var b := UI.button("‹ 메뉴", 100, 36)
+	var b := UI.button("‹ 홈", 100, 36)
 	b.theme = UI.theme()
 	b.position = Vector2(30, 30)
 	b.size = Vector2(200, 100)
-	b.pressed.connect(func(): GameState.go(GameState.SCENE_TITLE))
+	b.pressed.connect(func(): GameState.go(GameState.SCENE_HOME))
 	$HUD.add_child(b)
 
 # ---- 튜토리얼 (스테이지 1~3 첫 판: 새 룬을 그릴 때까지 전장 정지) ----
@@ -903,3 +927,76 @@ func _on_boss_spawned(e: Enemy) -> void:
 	elif not GameState.tutorial_done("boss"):
 		GameState.mark_tutorial("boss")
 		_hint("보스 등장! 체력이 많아요.\n완벽 판정으로 그리면 2배 피해 강화탄이 나갑니다.", 6.0)
+
+# ---- 과금 유도: 이어하기 · 보상 2배 · 스타터 팩 ----
+
+func _offer_continue() -> void:
+	stroke.cancel("이어하기")
+	get_tree().paused = true
+	var o := UI.overlay($HUD, 880.0)
+	_continue_panel = o[0]
+	var vb: VBoxContainer = o[1]
+	vb.add_child(UI.label("성이 무너졌다!", 60, UI.BAD))
+	vb.add_child(UI.label("이어하면 성 체력 50%를 되찾고
+성 가까이 온 적을 쓸어냅니다.", 34))
+	var cost := GameState.continue_cost()
+	var go := UI.button("무료로 이어하기 (첫 1회)" if cost == 0 else "이어하기 · 수정 %d" % cost, 130, 44)
+	go.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
+	vb.add_child(go)
+	var have := UI.label("보유 수정 %d" % GameState.gems(), 30, UI.DIM)
+	vb.add_child(have)
+	go.pressed.connect(func():
+		if GameState.gems() < cost:
+			# 바로 충전: 테스트 결제로 수정 100
+			var p: Dictionary = ShopData.PRODUCTS["gems_100"]
+			UI.confirm_purchase($HUD, p.title, ShopData.price_text(p.price), func():
+				GameState.grant("gems_100")
+				have.text = "보유 수정 %d" % GameState.gems())
+			return
+		if GameState.pay_continue():
+			GameState.sfx("upgrade")
+			_close_continue()
+			battle.revive(0.5)
+			get_tree().paused = false)
+	var give_up := UI.button("포기하기", 100, 36)
+	give_up.pressed.connect(func():
+		_close_continue()
+		get_tree().paused = false
+		battle.confirm_defeat())
+	vb.add_child(give_up)
+
+func _close_continue() -> void:
+	if _continue_panel != null:
+		_continue_panel.queue_free()
+		_continue_panel = null
+
+func _double_reward() -> void:
+	var st := int(_last_res.get("stones", 0))
+	if st <= 0:
+		return
+	if not GameState.spend_gems(ShopData.DOUBLE_COST):
+		var p: Dictionary = ShopData.PRODUCTS["gems_100"]
+		UI.confirm_purchase($HUD, "수정이 부족합니다 · " + p.title, ShopData.price_text(p.price), func():
+			GameState.grant("gems_100"))
+		return
+	GameState.add_stones(st)
+	GameState.sfx("upgrade")
+	_double_button.text = "마력석 +%d 추가로 받았습니다" % st
+	_double_button.disabled = true
+	_last_res.stones = 0
+
+func _offer_starter() -> void:
+	var p: Dictionary = ShopData.PRODUCTS["starter"]
+	var o := UI.overlay($HUD, 880.0)
+	var dim: Control = o[0]
+	var vb: VBoxContainer = o[1]
+	vb.add_child(UI.label("스타터 팩 등장!", 60, UI.STAR_ON))
+	vb.add_child(UI.label("%d시간 한정 · 한 번만 살 수 있어요" % ShopData.STARTER_HOURS, 32, UI.BAD))
+	vb.add_child(UI.label(p.desc, 36))
+	var buy := UI.button("상점에서 보기 · " + ShopData.price_text(p.price), 130, 42)
+	buy.add_theme_stylebox_override("normal", UI.box(Color(0.32, 0.25, 0.12), UI.STAR_ON, 18, 4))
+	buy.pressed.connect(func(): GameState.go(GameState.SCENE_STORE))
+	vb.add_child(buy)
+	var later := UI.button("나중에", 100, 36)
+	later.pressed.connect(func(): dim.queue_free())
+	vb.add_child(later)

@@ -7,6 +7,11 @@ config/name="Rune Magic Defense"
 run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
 config/quit_on_go_back=false
+config/icon="res://icon.png"
+boot_splash/bg_color=Color(0.1, 0.1, 0.14, 1)
+boot_splash/image="res://splash.png"
+boot_splash/fullsize=false
+boot_splash/use_filter=true
 
 [autoload]
 
