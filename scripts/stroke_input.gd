@@ -18,6 +18,8 @@ var _fade := 0.0
 var _fade_color := Color.WHITE
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventScreenTouch or event is InputEventScreenDrag:
+		event = make_input_local(event)  # 화면 좌표 → 이 노드 좌표 (세로로 긴 화면에서 월드가 내려가 있음)
 	if event is InputEventScreenTouch:
 		if event.index == 0 and event.pressed:
 			begin(event.position)

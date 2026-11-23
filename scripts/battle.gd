@@ -6,6 +6,9 @@ extends Node2D
 signal finished(won: bool)
 signal wave_started(wave: int)
 signal wave_cleared(wave: int)
+signal reaction_triggered(name: String)
+signal boss_spawned(boss: Enemy)
+signal castle_hit(damage: int)
 
 @export var combat: CombatConfig
 @export var runner: EnemyData
@@ -17,6 +20,15 @@ signal wave_cleared(wave: int)
 @export var castle_y: float = 1290.0
 @export var pool_size: int = 80
 @export var invincible: bool = false
+
+## 세로로 긴 화면에서 기준(1920)보다 위로 더 보이는 높이. 적은 그만큼 위에서 나오고
+## 이동 속도를 같은 비율로 올려, 성까지 걸리는 시간(밸런스)은 기준 화면과 같다.
+var field_extra := 0.0
+var speed_scale := 1.0
+
+## 스테이지 설정 (main.gd가 판 시작 전에 정한다)
+var enemy_hp_mult := 1.0  # 일반 적·졸개 체력 배율
+var allow_shield := true  # 방패 특성 허용 (룬 3개가 다 있어야 깰 수 있음)
 
 var running := false  # 판이 끝나지 않았음
 var fighting := false  # 웨이브 진행 중
@@ -41,6 +53,9 @@ var _wave_time := 0.0
 var _texts: Array = []  # [{text, pos, t, color}]
 var _lines: Array = []  # 연쇄·전파 선 [{a, b, t, color}]
 var _rings: Array = []  # 폭발 원 [{pos, r, t, color}]
+var _anims: Array = []  # 이펙트 시트 재생 [{name, pos, size, t, dur, tint}]
+var _deaths: Array = []  # 죽는 연출 [{tex, src, pos, size, t}]
+const MAX_ANIMS := 60
 var _fx: Node2D
 
 func _ready() -> void:
@@ -51,8 +66,15 @@ func _ready() -> void:
 		add_child(e)
 		_pool.append(e)
 	_fx = Node2D.new()
+	_fx.z_index = 1  # 적보다 위
+	_fx.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST  # 64px 픽셀 이펙트를 키워 그린다
 	add_child(_fx)
 	_fx.draw.connect(_draw_fx)
+	y_sort_enabled = true  # 아래(앞)에 있는 적이 위에 그려지게
+
+func set_field_extra(extra: float) -> void:
+	field_extra = maxf(extra, 0.0)
+	speed_scale = (castle_y + field_extra) / castle_y
 
 func start() -> void:
 	for e in _pool:
@@ -70,6 +92,8 @@ func start() -> void:
 	_texts.clear()
 	_lines.clear()
 	_rings.clear()
+	_anims.clear()
+	_deaths.clear()
 	wave = start_wave - 1
 	_rng.seed = seed
 	summon_cap_hits = 0
@@ -173,6 +197,7 @@ func deal_damage(e: Enemy, amount: float, source: String, element: int = Element
 	e.hp -= amount
 	if e.hp <= 0.0:
 		kills += 1
+		_add_death(e)
 		e.despawn()
 		if e.is_boss:
 			for o in _pool:
@@ -181,8 +206,14 @@ func deal_damage(e: Enemy, amount: float, source: String, element: int = Element
 
 func enemy_reached(e: Enemy) -> void:
 	leaks += 1
+	if e.is_boss:
+		var names := []
+		for t in e.traits:
+			names.append(t.id)
+		print("[boss-leak] wave=%d traits=%s shield=%s hp=%d/%d" % [wave, names, Element.name_of(e.shield_element), int(e.hp), int(e.max_hp)])
 	if not invincible:
 		castle_hp -= e.data.castle_damage
+		castle_hit.emit(e.data.castle_damage)
 	e.despawn()
 	if e.is_boss and wave >= combat.wave_count and not invincible:
 		castle_hp = 0  # final boss got through = defeat
@@ -193,6 +224,10 @@ func enemy_reached(e: Enemy) -> void:
 ## damage: direct hit (empowered already applied) / base_damage: before empowered, used for chain
 func on_projectile_hit(e: Enemy, damage: float, element: int, base_damage: float) -> void:
 	var pos := e.position
+	var fx := Art.impact_fx(element)
+	GameState.sfx({Element.FIRE: "fire", Element.ICE: "ice", Element.LIGHTNING: "lightning"}.get(element, "hit"))
+	if fx != "":
+		play_fx(fx, pos + (Vector2(0, -40) if element == Element.LIGHTNING else Vector2.ZERO), 120.0)
 	deal_damage(e, damage, "direct", element)
 	apply_element(e, element)
 	if element == Element.LIGHTNING:
@@ -203,6 +238,7 @@ func burst(center: Vector2, element: int, radius: float, damage: float) -> void:
 	if not fighting:
 		return
 	_rings.append({"pos": center, "r": radius, "t": 0.3, "color": Element.color_of(element)})
+	play_fx("rune_ring", center, radius * 2.0, Element.color_of(element).lightened(0.3), 0.5)
 	for o in active_enemies():
 		if o.position.distance_to(center) <= radius:
 			o.flash(Element.color_of(element))
@@ -225,6 +261,7 @@ func _chain(src: Enemy, from: Vector2, damage: float) -> void:
 			break
 		hit.append(best)
 		_lines.append({"a": cur, "b": best.position, "t": 0.15, "color": Element.color_of(Element.LIGHTNING)})
+		play_fx("lightning_strike", best.position + Vector2(0, -30), 90.0)
 		cur = best.position
 		best.flash(Element.color_of(Element.LIGHTNING))
 		deal_damage(best, damage * combat.chain_damage_ratio, "chain", Element.LIGHTNING)
@@ -266,6 +303,8 @@ func apply_element(e: Enemy, element: int) -> void:
 func _react(e: Enemy, rname: String, color: Color) -> void:
 	e.reaction_cd = combat.reaction_cooldown
 	reaction_counts[rname] += 1
+	reaction_triggered.emit(rname)
+	GameState.sfx("explosion")
 	e.on_reaction()
 	_texts.append({"text": rname, "pos": e.position + Vector2(0, -60), "t": 0.0, "color": color})
 
@@ -277,6 +316,7 @@ func _steam(e: Enemy, had_burn: bool) -> void:
 	e.slow_t = 0.0
 	_react(e, "증기 폭발", Color(0.95, 0.95, 1.0))
 	_rings.append({"pos": center, "r": combat.steam_radius, "t": 0.25, "color": Color.WHITE})
+	play_fx("fire_burst", center, combat.steam_radius * 1.6, Color(0.85, 0.95, 1.0))
 	var dmg := combat.steam_base_damage + extra
 	for o in active_enemies():
 		if o.position.distance_to(center) <= combat.steam_radius:
@@ -288,6 +328,7 @@ func _spread(e: Enemy) -> void:
 	e.burn_t = 0.0
 	e.shock_t = 0.0
 	_react(e, "화상 전파", Element.color_of(Element.FIRE))
+	play_fx("fire_burst", center, 160.0)
 	for o in active_enemies():
 		if o != e and o.position.distance_to(center) <= combat.spread_radius:
 			_lines.append({"a": center, "b": o.position, "t": 0.2, "color": Element.color_of(Element.FIRE)})
@@ -298,6 +339,7 @@ func _freeze(e: Enemy) -> void:
 	e.shock_t = 0.0
 	e.freeze_t = combat.freeze_duration
 	_react(e, "빙결", Element.color_of(Element.ICE))
+	play_fx("frost_nova", e.position, 150.0, Color.WHITE, combat.freeze_duration)
 
 func _end(won: bool) -> void:
 	if not running:
@@ -321,22 +363,32 @@ func _spawn_entry(e: Enemy, s: Dictionary, rng: RandomNumberGenerator) -> void:
 	if s.has("boss"):
 		var bi: int = s.boss
 		var traits := pick_traits(combat.boss_trait_counts[bi], rng)
-		e.spawn(s.data, Vector2(s.x, s.y), combat.boss_hp_multipliers[bi], traits, null, true)
+		e.spawn(s.data, Vector2(s.x, s.y - field_extra), combat.boss_hp_multipliers[bi], traits, null, true)
+		boss_spawned.emit(e)
 	else:
-		e.spawn(s.data, Vector2(s.x, s.y))
+		e.spawn(s.data, Vector2(s.x, s.y - field_extra), enemy_hp_mult)
 
 ## count traits, at most one per category
 func pick_traits(count: int, rng: RandomNumberGenerator) -> Array:
+	return choose_traits(boss_traits.items, count, rng, allow_shield)
+
+static func choose_traits(items: Array, count: int, rng: RandomNumberGenerator, shield_ok: bool) -> Array:
 	var out: Array = []
 	var used := {}
-	var pool: Array = boss_traits.items.duplicate()
+	var pool: Array = items.duplicate()
 	while out.size() < count and not pool.is_empty():
 		var t: BossTrait = pool.pop_at(rng.randi_range(0, pool.size() - 1))
-		if used.has(t.category):
+		if used.has(t.category) or (t.id == "shield" and not shield_ok):
 			continue
 		used[t.category] = true
 		out.append(t)
 	return out
+
+## 스테이지 맵 미리보기: 시드가 고정이라 실제로 나올 보스 특성을 미리 알 수 있다 (_build_wave와 같은 시드 규칙)
+static func preview_traits(items: Array, count: int, battle_seed: int, boss_wave: int, shield_ok: bool) -> Array:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = battle_seed + boss_wave * 7919
+	return choose_traits(items, count, rng, shield_ok)
 
 func random_element(exclude: int) -> int:
 	var opts := [Element.FIRE, Element.ICE, Element.LIGHTNING]
@@ -356,7 +408,7 @@ func summon_minions(owner: Enemy, n: int, cap: int) -> void:
 		if e == null:
 			return
 		var off := Vector2(_rng.randf_range(-140, 140), _rng.randf_range(20, 90))
-		e.spawn(swarm, owner.position + off, 1.0, [], owner)
+		e.spawn(swarm, owner.position + off, enemy_hp_mult, [], owner)
 
 func float_text(e: Enemy, text: String, color: Color) -> void:
 	_texts.append({"text": text, "pos": e.position + Vector2(0, -110), "t": 0.0, "color": color})
@@ -366,7 +418,7 @@ func spawn_test_boss(traits: Array, shield_element: int, hp_mult: float) -> Enem
 	for o in _pool:
 		o.despawn()
 	var e := _free_enemy()
-	e.spawn(boss, Vector2(540, -60), hp_mult, traits, null, true)
+	e.spawn(boss, Vector2(540, -60 - field_extra), hp_mult, traits, null, true)
 	if shield_element != Element.NONE:
 		e.shield_element = shield_element
 	return e
@@ -384,16 +436,31 @@ func _tick_fx(delta: float) -> void:
 		_texts.pop_front()
 	_lines = _lines.filter(func(l): return l.t > 0.0)
 	_rings = _rings.filter(func(r): return r.t > 0.0)
+	for a in _anims:
+		a.t += delta
+	_anims = _anims.filter(func(a): return a.t < a.dur)
+	for d in _deaths:
+		d.t += delta
+	_deaths = _deaths.filter(func(d): return d.t < DEATH_TIME)
 	_fx.queue_redraw()
 
 func _draw() -> void:
+	_draw_ground()
 	draw_line(Vector2(0, castle_y), Vector2(1080, castle_y), Color(0.85, 0.75, 0.5), 6)
-	var font := ThemeDB.fallback_font
+	var font := UI.font()
 	draw_string(font, Vector2(20, castle_y + 44), "성 %d / %d" % [castle_hp, combat.castle_hp], HORIZONTAL_ALIGNMENT_LEFT, 300, 34, Color(0.95, 0.85, 0.6))
 	draw_string(font, Vector2(760, castle_y + 44), "웨이브 %d / %d" % [wave, combat.wave_count], HORIZONTAL_ALIGNMENT_RIGHT, 300, 34, Color(0.85, 0.85, 0.9))
 
 func _draw_fx() -> void:
-	var font := ThemeDB.fallback_font
+	var font := UI.font()
+	for d in _deaths:
+		var k: float = d.t / DEATH_TIME
+		var sz: Vector2 = d.size * (1.0 - 0.35 * k)
+		var c := Color(1, 1, 1, 1.0 - k).lerp(Color(1.6, 1.6, 1.6, 1.0 - k), 1.0 - k)
+		_fx.draw_texture_rect_region(d.tex, Rect2(d.pos - sz / 2.0 + Vector2(0, sz.y * 0.15 * k), sz), d.src, c)
+	for a in _anims:
+		var fr := int(a.t * Art.FX_FPS)
+		Art.draw_fx_frame(_fx, a.name, fr, a.pos, a.size, a.tint)
 	for l in _lines:
 		_fx.draw_line(l.a, l.b, l.color, 6)
 	for r in _rings:
@@ -406,3 +473,59 @@ func _draw_fx() -> void:
 		var p: Vector2 = t.pos + Vector2(-150, -t.t * 80.0)
 		_fx.draw_string_outline(font, p, t.text, HORIZONTAL_ALIGNMENT_CENTER, 300, 40, 8, Color(0, 0, 0, c.a))
 		_fx.draw_string(font, p, t.text, HORIZONTAL_ALIGNMENT_CENTER, 300, 40, c)
+
+# ---- 바닥 (코드로 그린 돌바닥 · 성벽) ----
+
+const TILE := 120.0
+
+func _draw_ground() -> void:
+	var top := -field_extra - 20.0
+	draw_rect(Rect2(0, top, 1080, castle_y - top), Color(0.12, 0.12, 0.16))
+	# 돌판: 줄마다 반 칸 어긋나게, 칸마다 밝기를 조금씩 (해시로 고정)
+	var row := 0
+	var y := castle_y - TILE
+	while y > top - TILE:
+		var off := (TILE / 2.0) if row % 2 == 1 else 0.0
+		var x := -off
+		var col := 0
+		while x < 1080.0:
+			var h := absi(hash(Vector2i(col, row))) % 100
+			var c := Color(0.15, 0.15, 0.2).lerp(Color(0.1, 0.1, 0.13), h / 100.0)
+			draw_rect(Rect2(x + 3, y + 3, TILE - 6, TILE - 6), c)
+			x += TILE
+			col += 1
+		y -= TILE
+		row += 1
+	# 위쪽이 어둡게 (안개)
+	for i in 8:
+		var k := float(i) / 8.0
+		draw_rect(Rect2(0, top + i * 60.0, 1080, 60), Color(0.05, 0.05, 0.08, 0.6 * (1.0 - k)))
+	# 성벽: 흉벽 + 벽돌
+	var wall := Color(0.32, 0.28, 0.24)
+	draw_rect(Rect2(0, castle_y, 1080, 70), wall.darkened(0.3))
+	var bx := 0.0
+	while bx < 1080.0:
+		draw_rect(Rect2(bx + 4, castle_y - 34, 52, 34), wall)
+		draw_rect(Rect2(bx + 4, castle_y - 34, 52, 6), wall.lightened(0.2))
+		bx += 90.0
+	for i in 12:
+		draw_rect(Rect2(i * 90.0 + (45.0 if i % 2 == 0 else 0.0), castle_y + 30, 86, 4), wall.darkened(0.5))
+
+# ---- 이펙트 시트 · 죽는 연출 ----
+
+const DEATH_TIME := 0.35
+
+## 이펙트 한 번 재생. dur 생략 시 시트 한 바퀴 (반복형은 0.6초)
+func play_fx(name: String, pos: Vector2, size: float, tint := Color.WHITE, dur := -1.0) -> void:
+	if Art.fx_sheet(name) == null or _anims.size() >= MAX_ANIMS:
+		return
+	if dur < 0.0:
+		dur = 0.6 if Art.fx_loops(name) else Art.fx_frames(name) / Art.FX_FPS
+	_anims.append({"name": name, "pos": pos, "size": size, "t": 0.0, "dur": dur, "tint": tint})
+
+func _add_death(e: Enemy) -> void:
+	if e._sheet == null or _deaths.size() >= MAX_ANIMS:
+		return
+	var sh = e._sheet
+	_deaths.append({"tex": sh.tex, "src": Rect2(e.sprite_frame() * sh.fw, 0, sh.fw, sh.fh),
+		"pos": e.position, "size": e.sprite_size(), "t": 0.0})

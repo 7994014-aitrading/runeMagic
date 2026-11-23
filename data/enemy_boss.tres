@@ -10,3 +10,5 @@ speed = 32.0
 radius = 80.0
 color = Color(0.55, 0.3, 0.6, 1)
 castle_damage = 10
+sprite = "staticweaver"
+sprite_scale = 1.6

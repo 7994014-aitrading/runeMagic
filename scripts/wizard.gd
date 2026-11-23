@@ -11,8 +11,15 @@ var empower_element := Element.NONE
 var _fire_index := 0
 var _cooldown := 0.0
 var _pool: Array[Projectile] = []
+var _t := 0.0
+var _frames: Array = []  # 뒷모습 대기 프레임 (없으면 도형)
+const SPRITE_SCALE := 1.6
+const FOOT_Y := 60.0  # 발이 닿는 로컬 y
+const TIP := Vector2(57, -92)  # 그림 속 지팡이 수정 위치 (속성 빛)
 
 func _ready() -> void:
+	_frames = Art.wizard_frames("north")
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	for i in config.slot_count:
 		slots.append({"element": Element.NONE, "time_left": 0.0, "duration": 1.0})
 	for i in config.pool_size:
@@ -77,6 +84,7 @@ func _process(delta: float) -> void:
 				s.time_left = 0.0
 	if empower_element != Element.NONE and not _has_element(empower_element):
 		empower_element = Element.NONE
+	_t += delta
 	_cooldown -= delta
 	if _cooldown <= 0.0:
 		var tgt := _nearest_target()
@@ -123,9 +131,38 @@ func _fire(tgt: Node2D) -> void:
 	var dmg := config.base_damage * (config.empowered_multiplier if emp else 1.0)
 	if emp:
 		empower_element = Element.NONE
-	p.launch(global_position + Vector2(0, -110), tgt, e, dmg, config.projectile_speed, emp, config.base_damage)
+	p.launch(global_position + (TIP if not _frames.is_empty() else Vector2(0, -110)), tgt, e, dmg, config.projectile_speed, emp, config.base_damage)
 
 func _draw() -> void:
+	if not _frames.is_empty():
+		_draw_sprite()
+	else:
+		_draw_shapes()
+	_draw_gauges()
+
+func _draw_sprite() -> void:
+	var tex: Texture2D = _frames[int(_t * 12.0) % _frames.size()]
+	var size := Vector2(tex.get_width(), tex.get_height()) * SPRITE_SCALE
+	var foot := size.y * 140.0 / 164.0
+	draw_set_transform(Vector2(0, FOOT_Y), 0.0, Vector2(1.0, 0.3))
+	draw_circle(Vector2.ZERO, size.x * 0.25, Color(0, 0, 0, 0.35))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	draw_texture_rect(tex, Rect2(Vector2(-size.x / 2.0, FOOT_Y - foot), size), false)
+	var tip := _tip_element()
+	if tip != Element.NONE:
+		var c := Element.color_of(tip)
+		var pulse := 0.5 + 0.5 * sin(_t * 6.0)
+		draw_circle(TIP, 30.0 + 6.0 * pulse, Color(c, 0.25))
+		draw_circle(TIP, 15.0, Color(c, 0.75))
+		draw_circle(TIP, 6.0, Color(1, 1, 1, 0.9))
+
+func _tip_element() -> int:
+	for s in slots:
+		if s.element != Element.NONE:
+			return s.element
+	return Element.NONE
+
+func _draw_shapes() -> void:
 	# 몸
 	draw_colored_polygon(PackedVector2Array([Vector2(-70, 60), Vector2(70, 60), Vector2(0, -80)]), Color(0.45, 0.3, 0.75))
 	draw_circle(Vector2(0, -95), 34, Color(0.95, 0.85, 0.7))
@@ -138,8 +175,10 @@ func _draw() -> void:
 			break
 	draw_line(Vector2(60, 40), Vector2(60, -110), Color(0.5, 0.35, 0.2), 8)
 	draw_circle(Vector2(60, -118), 16, Element.color_of(tip))
+
+func _draw_gauges() -> void:
 	# 칸 게이지
-	var font := ThemeDB.fallback_font
+	var font := UI.font()
 	var w := 420.0
 	for i in slots.size():
 		var s: Dictionary = slots[i]

@@ -9,6 +9,11 @@ var damage := 0.0
 var base_damage := 0.0  # before empowered multiplier (chain uses this)
 var speed := 1600.0
 var target: Node2D
+var _t := 0.0
+var _fx := ""  # Art 이펙트 이름 (없으면 도형)
+
+func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 
 func launch(from: Vector2, tgt: Node2D, elem: int, dmg: float, spd: float, emp: bool, base_dmg: float) -> void:
 	base_damage = base_dmg
@@ -18,6 +23,12 @@ func launch(from: Vector2, tgt: Node2D, elem: int, dmg: float, spd: float, emp: 
 	damage = dmg
 	speed = spd
 	empowered = emp
+	_t = 0.0
+	_fx = Art.projectile_fx(elem)
+	if Art.fx_sheet(_fx) == null:
+		_fx = ""
+	if is_instance_valid(tgt):
+		rotation = (tgt.global_position - from).angle()
 	active = true
 	visible = true
 	queue_redraw()
@@ -35,6 +46,9 @@ func _process(delta: float) -> void:
 		_release()
 	else:
 		global_position += to.normalized() * step
+		rotation = to.angle()  # 시트는 오른쪽을 보고 있다
+		_t += delta
+		queue_redraw()
 
 func _release() -> void:
 	active = false
@@ -42,6 +56,12 @@ func _release() -> void:
 	target = null
 
 func _draw() -> void:
+	if _fx != "":
+		var size := 150.0 if empowered else 100.0
+		if empowered:
+			draw_circle(Vector2.ZERO, 34.0, Color(Element.color_of(element), 0.35))
+		Art.draw_fx_frame(self, _fx, int(_t * Art.FX_FPS), Vector2.ZERO, size)
+		return
 	var r := 30.0 if empowered else 18.0
 	var c := Element.color_of(element)
 	draw_circle(Vector2.ZERO, r, c)

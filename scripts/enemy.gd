@@ -36,6 +36,8 @@ var _summon_t := 0.0
 var _charge_t := 0.0
 var charge_phase := 0  # 0 대기, 1 예고, 2 돌진
 var _charge_phase_t := 0.0
+var _anim_t := 0.0  # 걷기 애니메이션 시간 (이동 속도에 맞춰 흐름)
+var _sheet = null  # Art.enemy_sheet() 결과 (없으면 도형)
 
 func spawn(d: EnemyData, pos: Vector2, hp_mult := 1.0, trait_list: Array = [], owner: Enemy = null, boss := false) -> void:
 	data = d
@@ -68,6 +70,8 @@ func spawn(d: EnemyData, pos: Vector2, hp_mult := 1.0, trait_list: Array = [], o
 	_summon_t = _summon.interval if _summon != null else 0.0
 	_charge_t = _charge.interval if _charge != null else 0.0
 	charge_phase = 0
+	_anim_t = randf() * 2.0
+	_sheet = Art.enemy_sheet(d.sprite)
 	active = true
 	visible = true
 	add_to_group("targets")
@@ -162,7 +166,8 @@ func _process(delta: float) -> void:
 		spd = 0.0
 	elif slow_t > 0.0:
 		spd *= cfg.slow_factor
-	spd = minf(spd, cfg.max_enemy_speed)
+	spd = minf(spd, cfg.max_enemy_speed) * battle.speed_scale
+	_anim_t += delta * clampf(spd / maxf(data.speed * battle.speed_scale, 1.0), 0.0, 3.0)
 	position.y += spd * delta
 	if position.y >= battle.castle_y:
 		battle.enemy_reached(self)
@@ -209,14 +214,17 @@ func _draw() -> void:
 	var body := data.color
 	if _flash > 0.0:
 		body = body.lerp(_flash_color, 0.7)
-	var font := ThemeDB.fallback_font
+	var font := UI.font()
 	# 돌진 예고·돌진
 	if charge_phase == 1:
 		var a := 0.4 + 0.4 * sin(_charge_phase_t * 20.0)
 		draw_circle(Vector2.ZERO, r + 30, Color(1, 0.2, 0.2, a))
 	elif charge_phase == 2:
 		draw_circle(Vector2.ZERO, r + 22, Color(1, 0.3, 0.2, 0.5))
-	draw_circle(Vector2.ZERO, r, body)
+	if _sheet != null:
+		r = _draw_sprite(r)
+	else:
+		draw_circle(Vector2.ZERO, r, body)
 	# 방패
 	if _shield != null:
 		if shield_active():
@@ -258,3 +266,32 @@ func _draw() -> void:
 		var c: Color = icons[i][1]
 		draw_circle(Vector2(x, r + 18), 13, c)
 		draw_string(font, Vector2(x - 13, r + 25), icons[i][0], HORIZONTAL_ALIGNMENT_CENTER, 26, 18, Color(0.08, 0.08, 0.1))
+
+const WALK_FPS := 12.0
+
+## 지금 걷기 프레임 (아래 방향 줄)
+func sprite_frame() -> int:
+	return int(_anim_t * WALK_FPS) % int(_sheet.cols) if _sheet != null else 0
+
+func sprite_size() -> Vector2:
+	return Vector2(_sheet.fw, _sheet.fh) * data.sprite_scale if _sheet != null else Vector2.ZERO
+
+## 그림을 그리고, 체력 바·아이콘을 붙일 반지름을 돌려준다
+func _draw_sprite(r: float) -> float:
+	var size := sprite_size()
+	var tint := Color.WHITE
+	if freeze_t > 0.0:
+		tint = Color(0.55, 0.85, 1.0)
+	elif slow_t > 0.0:
+		tint = Color(0.75, 0.9, 1.0)
+	if burn_t > 0.0:
+		tint = tint.lerp(Color(1.0, 0.6, 0.45), 0.35 + 0.15 * sin(_anim_t * 12.0))
+	if _flash > 0.0:
+		tint = tint.lerp(_flash_color.lightened(0.4), 0.7)
+	# 발밑 그림자
+	draw_set_transform(Vector2(0, size.y * 0.32), 0.0, Vector2(1.0, 0.35))
+	draw_circle(Vector2.ZERO, size.x * 0.28, Color(0, 0, 0, 0.35))
+	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
+	var src := Rect2(sprite_frame() * _sheet.fw, 0, _sheet.fw, _sheet.fh)
+	draw_texture_rect_region(_sheet.tex, Rect2(-size / 2.0, size), src, tint)
+	return maxf(r, size.y * 0.38)

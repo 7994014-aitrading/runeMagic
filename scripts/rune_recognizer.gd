@@ -11,9 +11,11 @@ const PHI := 0.6180339887
 
 var config: RuneConfig
 var templates: Array = []  # [{element, points}]
+var allowed: Array = []  # 쓸 수 있는 속성 (비면 전부)
 
-func _init(cfg: RuneConfig) -> void:
+func _init(cfg: RuneConfig, allowed_elements: Array = []) -> void:
 	config = cfg
+	allowed = allowed_elements
 	var sh := shapes()
 	for e in sh.keys():
 		var raw: PackedVector2Array = sh[e]
@@ -77,6 +79,11 @@ func recognize(stroke: PackedVector2Array, screen_height: float) -> Dictionary:
 	else:
 		res.tier = tier
 		res.element = res.best_element
+	# 해금 안 된 룬: 후보에서 빼지 않고(다른 룬으로 오인식 방지) 알아본 뒤 실패 처리
+	if res.element != Element.NONE and not allowed.is_empty() and not allowed.has(res.element):
+		res.tier = "fail"
+		res.element = Element.NONE
+		res.reason = "아직 못 쓰는 룬 (%s)" % Element.name_of(res.best_element)
 	return res
 
 # ---- $1 단계 ----

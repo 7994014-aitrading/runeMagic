@@ -10,3 +10,5 @@ speed = 55.0
 radius = 52.0
 color = Color(0.6, 0.6, 0.68, 1)
 castle_damage = 5
+sprite = "acolyte"
+sprite_scale = 1.05

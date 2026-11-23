@@ -50,7 +50,7 @@ func _draw() -> void:
 	draw_circle(Vector2.ZERO, radius, body)
 	draw_arc(Vector2.ZERO, radius * 0.66, 0, TAU, 32, Color(0.9, 0.9, 0.85), 8)
 	draw_arc(Vector2.ZERO, radius * 0.3, 0, TAU, 32, Color(0.9, 0.3, 0.25), 8)
-	var font := ThemeDB.fallback_font
+	var font := UI.font()
 	for t in _texts:
 		var c: Color = t.color
 		c.a = 1.0 - t.t / float_time

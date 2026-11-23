@@ -4,8 +4,13 @@ config_version=5
 [application]
 
 config/name="Rune Magic Defense"
-run/main_scene="res://scenes/main.tscn"
+run/main_scene="res://scenes/title.tscn"
 config/features=PackedStringArray("4.7", "Mobile")
+config/quit_on_go_back=false
+
+[autoload]
+
+GameState="*res://scripts/game_state.gd"
 
 [display]
 
@@ -14,8 +19,12 @@ window/size/viewport_height=1920
 window/size/window_width_override=540
 window/size/window_height_override=960
 window/stretch/mode="canvas_items"
-window/stretch/aspect="keep"
+window/stretch/aspect="keep_width"
 window/handheld/orientation=1
+
+[gui]
+
+theme/custom_font="res://assets/fonts/Galmuri11.ttf"
 
 [input_devices]
 
@@ -25,3 +34,4 @@ pointing/emulate_touch_from_mouse=true
 
 renderer/rendering_method="mobile"
 environment/defaults/default_clear_color=Color(0.1, 0.1, 0.14, 1)
+textures/vram_compression/import_etc2_astc=true

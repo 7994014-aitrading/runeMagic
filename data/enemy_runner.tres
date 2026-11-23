@@ -10,3 +10,5 @@ speed = 260.0
 radius = 26.0
 color = Color(0.95, 0.35, 0.4, 1)
 castle_damage = 1
+sprite = "imp"
+sprite_scale = 0.95
