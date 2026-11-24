@@ -42,7 +42,16 @@ var castle_hp := 0
 var kills := 0
 var leaks := 0
 var draws := 0
-var stats := {"direct": 0.0, "burn": 0.0, "chain": 0.0, "reaction": 0.0, "burst": 0.0}
+var stats := {"direct": 0.0, "burn": 0.0, "chain": 0.0, "reaction": 0.0, "burst": 0.0, "variant": 0.0}
+var fire_variant: RuneVariant = null  # 장착한 불 변형 (null = 기본)
+## 계측 (피해 합계와 따로 센다, 판 끝에 [metrics] 줄로 출력). 키는 쓰는 곳에서 만든다.
+## 강화탄: perfect_new/replace/refresh → emp_reserved(_fire) / emp_overwritten / emp_cleared → emp_fired(_fire) → emp_hit(_fire) / emp_lost
+## 역화: bf_reserved / bf_overwritten → bf_fired → bf_hit / bf_lost, bf_damage
+## 폭염: blaze_procs / blaze_procs_hit, blaze_tries / blaze_new / blaze_refresh / blaze_blocked, blaze_burn_dmg, blaze_steam(_extra)
+## 그 밖: direct_fire, kill_life_sum, boss_ttk, leak_hp, minions_cleared
+var m := {}
+var fire_hits := 0  # 불 탄 명중 누계 (역화 "불 명중 1회 이상" 조건)
+var burn_charge := 0.0  # 역화 충전식: 쌓인 화상 피해량 (예약할 때 0으로)
 var reaction_counts := {"증기 폭발": 0, "화상 전파": 0, "빙결": 0}
 var result_text := ""
 var start_wave := 1  # debug: start from this wave
@@ -95,6 +104,9 @@ func start() -> void:
 		stats[k] = 0.0
 	for k in reaction_counts.keys():
 		reaction_counts[k] = 0
+	m.clear()
+	fire_hits = 0
+	burn_charge = 0.0
 	result_text = ""
 	_texts.clear()
 	_lines.clear()
@@ -198,26 +210,45 @@ func active_enemies() -> Array[Enemy]:
 
 # ---- 피해 ----
 
-func deal_damage(e: Enemy, amount: float, source: String, element: int = Element.NONE) -> void:
+## 반환: 실제로 깎인 체력 (과잉 피해 제외)
+func deal_damage(e: Enemy, amount: float, source: String, element: int = Element.NONE) -> float:
 	if not e.active:
-		return
+		return 0.0
 	amount = e.modify_damage(amount, element)
-	stats[source] += minf(amount, maxf(e.hp, 0.0))  # count only damage that removed hp (no overkill)
+	var dealt := minf(amount, maxf(e.hp, 0.0))  # count only damage that removed hp (no overkill)
+	stats[source] += dealt
 	e.hp -= amount
 	if e.hp <= 0.0:
 		kills += 1
+		_madd("kill_life_sum", elapsed - e.spawn_t)
+		if e.is_boss:
+			m["boss_ttk"] = elapsed - e.spawn_t
 		_add_death(e)
 		e.despawn()
 		if e.is_boss:
 			for o in _pool:
 				if o.active and o.owner_boss == e:
 					o.despawn()
+					_madd("minions_cleared", 1)
+	return dealt
+
+func _madd(key: String, v: float) -> void:
+	m[key] = m.get(key, 0) + v
+
+## 화상 피해 (첫 피해·틱 공통): 역화 충전량과 폭염 몫을 같이 센다
+func burn_damage(e: Enemy, amount: float) -> void:
+	var from_blaze := e.burn_from_blaze
+	var d := deal_damage(e, amount, "burn", Element.FIRE)
+	burn_charge += d
+	if from_blaze:
+		_madd("blaze_burn_dmg", d)
 
 func enemy_reached(e: Enemy) -> void:
 	if _pending_defeat:
 		e.despawn()
 		return
 	leaks += 1
+	_madd("leak_hp", maxf(e.hp, 0.0))
 	if e.is_boss:
 		var names := []
 		for t in e.traits:
@@ -269,16 +300,62 @@ func confirm_defeat() -> void:
 	_end(false)
 
 ## damage: direct hit (empowered already applied) / base_damage: before empowered, used for chain
-func on_projectile_hit(e: Enemy, damage: float, element: int, base_damage: float) -> void:
+## 처리 순서: 직접 피해 → 역화 보상(같은 대상, 탄 속성) → 속성·반응 → 연쇄 → 폭염(원래 맞은 적 제외)
+func on_projectile_hit(e: Enemy, damage: float, element: int, base_damage: float, empowered := false, bonus := 0.0) -> void:
 	var pos := e.position
 	var fx := Art.impact_fx(element)
 	GameState.sfx({Element.FIRE: "fire", Element.ICE: "ice", Element.LIGHTNING: "lightning"}.get(element, "hit"))
 	if fx != "":
 		play_fx(fx, pos + (Vector2(0, -40) if element == Element.LIGHTNING else Vector2.ZERO), 120.0)
-	deal_damage(e, damage, "direct", element)
+	if empowered:
+		_madd("emp_hit", 1)
+		if element == Element.FIRE:
+			_madd("emp_hit_fire", 1)
+	if element == Element.FIRE:
+		fire_hits += 1
+	var d := deal_damage(e, damage, "direct", element)
+	if element == Element.FIRE:
+		_madd("direct_fire", d)
+	if bonus > 0.0:
+		_madd("bf_hit", 1)
+		_madd("bf_damage", deal_damage(e, bonus, "variant", element))
+		if e.active:
+			float_text(e, "역화", Element.color_of(Element.FIRE))
 	apply_element(e, element)
 	if element == Element.LIGHTNING:
 		_chain(e, pos, base_damage)
+	if empowered and element == Element.FIRE and fire_variant != null and fire_variant.empowered_burn_radius > 0.0:
+		_blaze(e, pos, fire_variant.empowered_burn_radius)
+
+## 폭염 (불 변형): 불 강화탄이 맞은 자리 주변 적에게 화상. 원래 맞은 적은 제외 (그 적은 일반 처리만).
+## 반응은 일으키지 않고 화상만 붙인다. 방패 속성이 불이면 막힘.
+func _blaze(src: Enemy, center: Vector2, radius: float) -> void:
+	_madd("blaze_procs", 1)
+	_rings.append({"pos": center, "r": radius, "t": 0.3, "color": Element.color_of(Element.FIRE)})
+	play_fx("fire_burst", center, radius * 1.4)
+	var n := 0
+	for o in active_enemies():
+		if o == src or o.position.distance_to(center) > radius:
+			continue
+		_madd("blaze_tries", 1)
+		if o.blocks_element(Element.FIRE):
+			_madd("blaze_blocked", 1)
+			continue
+		_madd("blaze_refresh" if o.burn_t > 0.0 else "blaze_new", 1)
+		o.apply_burn(combat, true)
+		n += 1
+	if n > 0:
+		_madd("blaze_procs_hit", 1)
+		_texts.append({"text": "폭염", "pos": center + Vector2(0, -60), "t": 0.0, "color": Element.color_of(Element.FIRE)})
+
+## 역화 (불 변형): 불 칸이 교체되어 나갈 때 보상량. 0이면 보상 없음. 충전식이면 충전량을 소비한다.
+## main.gd의 cast_rune()이 교체 직후, 속성 폭발 강화보다 먼저 부른다.
+func backfire_reward(duration: float, left: float, hits_since_fire: int) -> float:
+	if fire_variant == null or fire_variant.backfire_formula == "none":
+		return 0.0
+	var r := fire_variant.backfire_reward(duration, left, burn_charge, hits_since_fire)
+	burn_charge = 0.0
+	return r
 
 ## 완벽 시 속성 폭발 (강화): 그린 자리 주변 적에게 피해 + 속성
 func burst(center: Vector2, element: int, radius: float, damage: float) -> void:
@@ -358,6 +435,9 @@ func _react(e: Enemy, rname: String, color: Color) -> void:
 ## 증기 폭발: 기본 피해 + 소모된 화상의 남은 피해 전부를 범위에.
 func _steam(e: Enemy, had_burn: bool) -> void:
 	var extra := e.remaining_burn_damage() if had_burn else combat.burn_dps * combat.burn_duration
+	if had_burn and e.burn_from_blaze:
+		_madd("blaze_steam", 1)
+		_madd("blaze_steam_extra", extra)
 	var center := e.position
 	e.burn_t = 0.0
 	e.slow_t = 0.0

@@ -7,6 +7,7 @@ const ITEMS := [
 	["music", "음악"],
 	["vibration", "진동"],
 	["dev", "개발자 정보 (디버그 패널)"],
+	["try_blaze", "시험: 불 변형 '폭염' (다음 판부터)"],  # 개발자 정보가 켜져 있을 때만 보임
 ]
 
 static func open(parent: Node, on_close: Callable = Callable()) -> Control:
@@ -15,6 +16,8 @@ static func open(parent: Node, on_close: Callable = Callable()) -> Control:
 	var vb: VBoxContainer = o[1]
 	vb.add_child(UI.label("설정", 56, UI.GOLD))
 	for it in ITEMS:
+		if it[0] == "try_blaze" and not GameState.setting("dev"):
+			continue
 		var c := CheckButton.new()
 		var title: String = it[1]
 		c.button_pressed = GameState.setting(it[0])

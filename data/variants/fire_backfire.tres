@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="RuneVariant" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/rune_variant.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "backfire"
+title = "역화"
+element = 1
+description = "불 칸을 다른 속성으로 밀어내면 다음 탄 1발이 추가 피해를 준다. 불을 깔고 한참 두었다가 끊을 때 가장 크다."
+burn_dps_mult = 0.9
+burn_duration_mult = 1.0
+empowered_burn_radius = 0.0
+backfire_formula = "min"
+backfire_coef = 10.0
+backfire_require_hit = false

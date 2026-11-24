@@ -40,6 +40,9 @@ var _stage := 0  # 0 = 스테이지 없음 (시험 판)
 var _sim := false  # --stage 봇 실행: 저장·영구 강화·튜토리얼 안 씀
 var _seed_given := false
 var _sim_perm := 0  # --perm=N: 봇이 영구 강화를 전부 N레벨(상한까지) 가진 것으로
+var _fire_variant_id := ""  # --fire-variant=ember|blaze|backfire|backfire_rem|backfire_charge (빈 값 = 기본 불)
+var _fire_hits_at_cast := 0  # 마지막 불 시전 때의 battle.fire_hits (역화 "불 명중" 조건)
+var allow_try_variant := true  # 설정의 "시험: 폭염" 토글을 따를지 (스크립트 테스트는 끔)
 var _runes: Array = [Element.FIRE, Element.ICE, Element.LIGHTNING]  # 이번 판에 쓸 수 있는 룬
 var _offer_context := "wave"  # "wave" / "start"
 var _pause_panel: Control
@@ -83,6 +86,8 @@ func _ready() -> void:
 			_seed_given = true
 		elif a.begins_with("--perm="):
 			_sim_perm = int(a.substr(7))
+		elif a.begins_with("--fire-variant="):
+			_fire_variant_id = a.substr(15)
 		elif a.begins_with("--stage="):
 			_stage = int(a.substr(8))
 			_sim = true
@@ -145,8 +150,17 @@ func _new_run() -> void:
 	config = _base_config.duplicate(true)
 	battle.combat = _base_combat.duplicate(true)
 	wizard.config = config
+	wizard.battle = battle
+	_fire_hits_at_cast = 0
 	if _stage > 0:
 		_apply_stage()
+	var fv := _fire_variant_id
+	if fv == "" and allow_try_variant and not _sim and _bot == "" and GameState.setting("try_blaze"):
+		fv = "blaze"  # 설정의 시험 토글 (장착 화면 전까지)
+	battle.fire_variant = RuneVariant.load_id(fv) if fv != "" else null
+	if battle.fire_variant != null:
+		battle.combat.burn_dps *= battle.fire_variant.burn_dps_mult
+		battle.combat.burn_duration *= battle.fire_variant.burn_duration_mult
 	if _stage == 0:
 		_runes = [Element.FIRE, Element.ICE, Element.LIGHTNING]
 	elif _sim:
@@ -157,6 +171,7 @@ func _new_run() -> void:
 	battle.allow_continue = _stage > 0 and not _sim
 	recognizer = RuneRecognizer.new(config, _runes)
 	wizard.clear_slots()
+	wizard.reset_shots()
 	wizard.set_slot_count(config.slot_count)
 	_taken.clear()
 	_upgrade_rng.seed = battle.seed
@@ -171,6 +186,8 @@ func _new_run() -> void:
 	queue_redraw()
 	battle.start()
 	GameState.music("battle")
+	if battle.fire_variant != null and not _sim and _bot == "" and _await_rune == Element.NONE:
+		_hint("불 변형 '%s' 장착\n%s" % [battle.fire_variant.title, battle.fire_variant.description], 5.0)
 	if _stage > 0 and not _sim and GameState.perm_level("start_pick") > 0:
 		_offer_upgrades("start", 0)
 
@@ -245,19 +262,20 @@ func _on_stroke_finished(points: PackedVector2Array) -> void:
 			detail = ""
 		_show(tier_name, Color(0.75, 0.75, 0.75), r.reason + ("\n" + detail if detail != "" else ""))
 	else:
-		var kind := wizard.apply_rune(r.element, r.tier)
+		var center := Vector2.ZERO
+		for p in points:
+			center += p
+		var bonus_before := wizard.bonus_pending
+		var kind := cast_rune(r.element, r.tier, center / maxf(points.size(), 1))
 		var c := Element.color_of(r.element)
 		stroke.flash_result(c)
 		var extra: String = {"refresh": "시간 갱신", "new": "부여", "replace": "교체"}[kind]
 		extra += " %d초" % int(config.duration_for(r.tier))
 		if r.tier == "perfect" and kind != "refresh":
 			extra += " + 강화탄"
+		if wizard.bonus_pending > 0.0 and wizard.bonus_pending != bonus_before:
+			extra += " + 역화 %d" % int(wizard.bonus_pending)
 		if r.tier == "perfect" and battle != null and _taken.get("burst", 0) > 0:
-			var u := _upgrade("burst")
-			var center := Vector2.ZERO
-			for p in points:
-				center += p
-			battle.burst(center / points.size(), r.element, u.amount, u.amount_b)
 			extra += " + 폭발"
 		_show("%s · %s" % [Element.name_of(r.element), tier_name], c, extra + "\n" + detail)
 		GameState.sfx("cast", 3.0 if r.tier == "perfect" else 0.0)
@@ -265,6 +283,37 @@ func _on_stroke_finished(points: PackedVector2Array) -> void:
 			GameState.vibrate(15)
 		_tutorial_rune_drawn(r.element)
 	_log(r, points.size())
+
+## 계측 한 줄: key=value (소수는 정수로)
+func metrics_text() -> String:
+	var keys := battle.m.keys()
+	keys.sort()
+	var parts := []
+	for k in keys:
+		parts.append("%s=%d" % [k, int(round(float(battle.m[k])))])
+	return " ".join(parts)
+
+## 인식 성공 뒤 공통 시전. 게임(획)·봇·스크립트 테스트가 모두 이 함수를 쓴다 (인식 흔들림만 빠짐).
+## 순서: 칸 배정 → 역화 스냅샷·예약 (교체 직전 불 칸 상태, 충전량) → 완벽 시 속성 폭발 강화.
+## 반환: "refresh" / "new" / "replace"
+func cast_rune(element: int, tier: String, center: Vector2) -> String:
+	var kind := wizard.apply_rune(element, tier)
+	if battle == null:
+		return kind
+	if kind == "replace" and wizard.last_replaced == Element.FIRE:
+		var reward := battle.backfire_reward(wizard.last_replaced_duration, wizard.last_replaced_left,
+			battle.fire_hits - _fire_hits_at_cast)
+		if reward > 0.0:
+			if wizard.bonus_pending > 0.0:
+				battle.m["bf_overwritten"] = battle.m.get("bf_overwritten", 0) + 1
+			wizard.bonus_pending = reward  # 1개만, 덮어쓰기 (강화탄 예약과 같은 규칙)
+			battle.m["bf_reserved"] = battle.m.get("bf_reserved", 0) + 1
+	if element == Element.FIRE:
+		_fire_hits_at_cast = battle.fire_hits
+	if tier == "perfect" and _taken.get("burst", 0) > 0:
+		var u := _upgrade("burst")
+		battle.burst(center, element, u.amount, u.amount_b)
+	return kind
 
 func _show(title: String, color: Color, detail: String) -> void:
 	result_label.text = title
@@ -443,11 +492,14 @@ func _on_battle_finished(won: bool) -> void:
 	detail_label.text = ""
 	_result_time = 0.0
 	_show_result_panel(won)
-	var line := "[battle] stage=%d bot=%s won=%s wave=%d castle=%d time=%d kills=%d leaks=%d direct=%d burn=%d chain=%d reaction=%d burst=%d steam=%d spread=%d freeze=%d draws=%d ups=%s" % [
-		_stage, _bot, won, battle.wave, battle.castle_hp, int(battle.elapsed), battle.kills, battle.leaks,
+	var line := "[battle] stage=%d bot=%s fv=%s won=%s wave=%d castle=%d time=%d kills=%d leaks=%d direct=%d burn=%d chain=%d reaction=%d burst=%d variant=%d procs=%d steam=%d spread=%d freeze=%d draws=%d ups=%s" % [
+		_stage, _bot, _fire_variant_id if _fire_variant_id != "" else "base", won, battle.wave, battle.castle_hp, int(battle.elapsed), battle.kills, battle.leaks,
 		int(battle.stats.direct), int(battle.stats.burn), int(battle.stats.chain), int(battle.stats.reaction), int(battle.stats.burst),
+		int(battle.stats.variant), int(battle.m.get("bf_reserved", 0) + battle.m.get("blaze_procs_hit", 0)),
 		battle.reaction_counts["증기 폭발"], battle.reaction_counts["화상 전파"], battle.reaction_counts["빙결"], battle.draws, _taken]
 	print(line)
+	print("[metrics] stage=%d bot=%s fv=%s seed=%d %s" % [_stage, _bot, _fire_variant_id if _fire_variant_id != "" else "base",
+		battle.seed, metrics_text()])
 	if _quit_on_end:
 		get_tree().quit()
 

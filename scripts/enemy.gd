@@ -14,6 +14,9 @@ var owner_boss: Enemy = null  # 소환한 보스 (졸개만)
 
 var burn_t := 0.0
 var burn_dps := 0.0
+var burn_from_blaze := false
+var spawn_t := 0.0  # 나온 시각 (battle.elapsed, 처치 시간 계측)
+var gen := 0  # 풀에서 다시 나올 때마다 +1. 투사체가 옛 대상(같은 노드의 새 적)을 맞히지 않게
 var _burn_tick := 0.0
 var slow_t := 0.0
 var shock_t := 0.0
@@ -48,7 +51,10 @@ func spawn(d: EnemyData, pos: Vector2, hp_mult := 1.0, trait_list: Array = [], o
 	position = pos
 	is_boss = boss
 	owner_boss = owner
+	gen += 1
+	spawn_t = battle.elapsed
 	burn_t = 0.0
+	burn_from_blaze = false
 	slow_t = 0.0
 	shock_t = 0.0
 	freeze_t = 0.0
@@ -91,10 +97,10 @@ func is_targetable() -> bool:
 	return active
 
 ## 투사체가 부른다.
-func take_hit(damage: float, element: int, _empowered: bool, base_damage: float) -> void:
+func take_hit(damage: float, element: int, empowered: bool, base_damage: float, bonus := 0.0) -> void:
 	if active:
 		flash(Element.color_of(element))
-		battle.on_projectile_hit(self, damage, element, base_damage)
+		battle.on_projectile_hit(self, damage, element, base_damage, empowered, bonus)
 
 func flash(c: Color) -> void:
 	_flash = 0.12
@@ -128,13 +134,15 @@ func on_reaction() -> void:
 		shield_broken_t = _shield.duration
 		battle.float_text(self, "방패 파괴", Color(1.0, 0.85, 0.3))
 
-func apply_burn(cfg: CombatConfig) -> void:
+## from_blaze: 폭염으로 붙은 화상 (계측용 표시, 일반 불이 다시 붙이면 해제)
+func apply_burn(cfg: CombatConfig, from_blaze := false) -> void:
 	var fresh := burn_t <= 0.0
 	burn_t = cfg.burn_duration
 	burn_dps = cfg.burn_dps
+	burn_from_blaze = from_blaze
 	if fresh:
 		_burn_tick = cfg.burn_tick
-		battle.deal_damage(self, burn_dps * cfg.burn_tick, "burn", Element.FIRE)  # 맞는 순간 첫 피해
+		battle.burn_damage(self, burn_dps * cfg.burn_tick)  # 맞는 순간 첫 피해
 
 func remaining_burn_damage() -> float:
 	return burn_dps * maxf(burn_t, 0.0)
@@ -158,7 +166,7 @@ func _process(delta: float) -> void:
 		_burn_tick -= delta
 		if _burn_tick <= 0.0:
 			_burn_tick += cfg.burn_tick
-			battle.deal_damage(self, burn_dps * cfg.burn_tick, "burn", Element.FIRE)
+			battle.burn_damage(self, burn_dps * cfg.burn_tick)
 			if not active:
 				return
 	_tick_traits(delta)

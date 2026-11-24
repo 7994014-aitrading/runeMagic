@@ -1,0 +1,13 @@
+[gd_resource type="Resource" script_class="RuneVariant" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/rune_variant.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "blaze"
+title = "폭염"
+element = 1
+description = "완벽 판정으로 새로 붙이거나 교체하면 불 강화탄이 맞은 적 주변의 다른 적에게 화상을 퍼뜨린다. 평소 화상은 조금 약하다."
+burn_dps_mult = 0.85
+burn_duration_mult = 1.0
+empowered_burn_radius = 220.0

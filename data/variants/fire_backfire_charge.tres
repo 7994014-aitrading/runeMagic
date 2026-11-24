@@ -1,0 +1,16 @@
+[gd_resource type="Resource" script_class="RuneVariant" load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://scripts/rune_variant.gd" id="1"]
+
+[resource]
+script = ExtResource("1")
+id = "backfire_charge"
+title = "역화 (충전식)"
+element = 1
+description = "불 칸을 밀어낼 때 지난 역화 뒤 쌓인 화상 피해에 비례한 추가 피해."
+burn_dps_mult = 0.9
+burn_duration_mult = 1.0
+empowered_burn_radius = 0.0
+backfire_formula = "charge"
+backfire_coef = 1.1
+backfire_require_hit = false

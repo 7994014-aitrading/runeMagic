@@ -8,6 +8,12 @@ extends Node2D
 
 var slots: Array = []  # [{element, time_left, duration}]
 var empower_element := Element.NONE
+## apply_rune이 "replace"일 때 밀려난 칸의 교체 직전 상태 (역화 보상 계산용)
+var last_replaced := Element.NONE
+var last_replaced_duration := 0.0
+var last_replaced_left := 0.0
+var bonus_pending := 0.0  # 역화 보상 예약: 다음에 발사되는 탄 1발에 복사 (속성 무관, 덮어쓰기)
+var battle: Battle  # 계측용 (연습 장면에서는 null)
 var _fire_index := 0
 var _cooldown := 0.0
 var _pool: Array[Projectile] = []
@@ -35,6 +41,7 @@ func _ready() -> void:
 		slots.append({"element": Element.NONE, "time_left": 0.0, "duration": 1.0})
 	for i in config.pool_size:
 		var p := Projectile.new()
+		p.wizard_ref = self
 		p.visible = false
 		projectile_parent.add_child(p)
 		_pool.append(p)
@@ -44,6 +51,19 @@ func clear_slots() -> void:
 		s.element = Element.NONE
 		s.time_left = 0.0
 	empower_element = Element.NONE
+	bonus_pending = 0.0
+
+## 새 판 시작: 비행 중 탄을 거두고 발사 쿨다운·순번을 처음으로 (이전 판 탄이 새 판에 맞지 않게)
+func reset_shots() -> void:
+	for p in _pool:
+		if p.active:
+			p.discard()
+	_cooldown = 0.0
+	_fire_index = 0
+
+func _m(key: String) -> void:
+	if battle != null:
+		battle.m[key] = battle.m.get(key, 0) + 1
 
 func remaining_of(e: int) -> float:
 	for s in slots:
@@ -66,8 +86,13 @@ func apply_rune(element: int, tier: String) -> String:
 		if s.element == element:
 			s.time_left = dur
 			s.duration = dur
+			if tier == "perfect":
+				_m("perfect_refresh")
 			return "refresh"
 	var kind := "new"
+	last_replaced = Element.NONE
+	last_replaced_duration = 0.0
+	last_replaced_left = 0.0
 	var target = null
 	for s in slots:
 		if s.element == Element.NONE:
@@ -79,11 +104,20 @@ func apply_rune(element: int, tier: String) -> String:
 		for s in slots:
 			if s.time_left < target.time_left:
 				target = s
+		last_replaced = target.element
+		last_replaced_duration = target.duration
+		last_replaced_left = target.time_left
 	target.element = element
 	target.time_left = dur
 	target.duration = dur
 	if tier == "perfect":
+		_m("perfect_" + kind)
+		if empower_element != Element.NONE:
+			_m("emp_overwritten")
 		empower_element = element  # 예약은 1발, 덮어쓰기
+		_m("emp_reserved")
+		if element == Element.FIRE:
+			_m("emp_reserved_fire")
 	return kind
 
 func _process(delta: float) -> void:
@@ -95,6 +129,7 @@ func _process(delta: float) -> void:
 				s.time_left = 0.0
 	if empower_element != Element.NONE and not _has_element(empower_element):
 		empower_element = Element.NONE
+		_m("emp_cleared")
 	_t += delta
 	_cooldown -= delta
 	if _cooldown <= 0.0:
@@ -142,7 +177,14 @@ func _fire(tgt: Node2D) -> void:
 	var dmg := config.base_damage * (config.empowered_multiplier if emp else 1.0)
 	if emp:
 		empower_element = Element.NONE
-	p.launch(global_position + (TIP if not _frames.is_empty() else Vector2(0, -110)), tgt, e, dmg, config.projectile_speed, emp, config.base_damage)
+		_m("emp_fired")
+		if e == Element.FIRE:
+			_m("emp_fired_fire")
+	var bonus := bonus_pending
+	bonus_pending = 0.0
+	if bonus > 0.0:
+		_m("bf_fired")
+	p.launch(global_position + (TIP if not _frames.is_empty() else Vector2(0, -110)), tgt, e, dmg, config.projectile_speed, emp, config.base_damage, bonus)
 
 func _draw() -> void:
 	if not _frames.is_empty():
